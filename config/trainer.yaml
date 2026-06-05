@@ -48,7 +48,7 @@ collection:
     num_final_episodes: 100
 
 static_dataset:
-  path: /blue/iruchkin/khek.do/dataset_mcts  # if specified, will disable train/test data collection
+  path: /home/khek.do/dataset_mcts  # if specified, will disable train/test data collection
   ignore_sample_weights: True
 
 training:
