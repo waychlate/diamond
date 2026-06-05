@@ -1,0 +1,14 @@
+num_actions: 5 # [0,4] discrete actions
+obs_shape: [3, 48, 320]
+
+train:
+  id: highway-v0
+  size: [48, 320]
+  max_episode_steps: 100
+
+test:
+  id: ${..train.id}
+  size: ${..train.size}
+  max_episode_steps: 100
+
+keymap: highway

@@ -1,6 +1,6 @@
 defaults:
   - _self_
-  - env: atari
+  - env: highway
   - agent: default
 
 hydra:
@@ -8,7 +8,7 @@ hydra:
     chdir: True
 
 wandb:
-  mode: disabled
+  mode: online
   project: null
   entity: null
   name: null
@@ -33,9 +33,9 @@ checkpointing:
 
 collection:
   train:
-    num_envs: 1
+    num_envs: 0
     epsilon: 0.01
-    num_steps_total: 100000
+    num_steps_total: 0
     first_epoch:
       min: 5000
       max: 10000  # null: no maximum
@@ -48,20 +48,20 @@ collection:
     num_final_episodes: 100
 
 static_dataset:
-  path: null  # if specified, will disable train/test data collection
+  path: /blue/iruchkin/khek.do/dataset_mcts  # if specified, will disable train/test data collection
   ignore_sample_weights: True
 
 training:
   should: True
   num_final_epochs: 50
   cache_in_ram: True
-  num_workers_data_loaders: 0
+  num_workers_data_loaders: 16
   model_free: False # if True, turn off world_model training and RL in imagination
   compile_wm: True
 
 evaluation:
   should: True
-  every: 10
+  every: 1
 
 world_model_env:
   _target_: envs.WorldModelEnvConfig
@@ -83,8 +83,8 @@ denoiser:
   training:
     num_autoregressive_steps: 1
     start_after_epochs: 0
-    steps_first_epoch: 10000
-    steps_per_epoch: 400
+    steps_first_epoch: 50000
+    steps_per_epoch: 1000
     sample_weights: [0.1, 0.1, 0.1, 0.7]
     batch_size: 32
     grad_acc_steps: 1
@@ -125,9 +125,9 @@ actor_critic:
     sample_weights: ${denoiser.training.sample_weights}
     batch_size: 32
     grad_acc_steps: 1
-    start_after_epochs: 0
-    steps_first_epoch: 5000
-    steps_per_epoch: 400
+    start_after_epochs: 999999
+    steps_first_epoch: 0
+    steps_per_epoch: 0
     lr_warmup_steps: 100
     max_grad_norm: 100.0
 

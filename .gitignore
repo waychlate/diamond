@@ -8,6 +8,9 @@ experiments
 checkpoints
 saved_runs
 dataset
+dataset_mcts
+*.tar.gz
+.venv
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
