@@ -98,9 +98,13 @@ class Trainer(StateDictMixin):
 
         # Envs
         if self._rank == 0:
-            train_env = make_atari_env(num_envs=cfg.collection.train.num_envs, device=self._device, **cfg.env.train)
-            test_env = make_atari_env(num_envs=cfg.collection.test.num_envs, device=self._device, **cfg.env.test)
-            num_actions = int(test_env.num_actions)
+            if self._is_static_dataset and "num_actions" in cfg.env:
+                num_actions = cfg.env.num_actions
+                train_env = test_env = None
+            else:
+                train_env = make_atari_env(num_envs=cfg.collection.train.num_envs, device=self._device, **cfg.env.train)
+                test_env = make_atari_env(num_envs=cfg.collection.test.num_envs, device=self._device, **cfg.env.test)
+                num_actions = int(test_env.num_actions)
         else:
             num_actions = None
         num_actions, = broadcast_if_needed(num_actions)
