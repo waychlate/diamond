@@ -3,7 +3,6 @@ wandb
 .vscode
 outputs
 results/figures
-slurm*
 experiments
 checkpoints
 saved_runs
