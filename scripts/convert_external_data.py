@@ -94,5 +94,6 @@ def convert_data(src_dir, dst_dir):
 
 if __name__ == "__main__":
     SRC = "/blue/iruchkin/khek.do/final_output"
-    DST = "/blue/iruchkin/khek.do/dataset_mcts"
+    # DST = "/blue/iruchkin/khek.do/dataset_mcts"
+    DST = "/home/khek.do/dataset_mcts"
     convert_data(SRC, DST)
