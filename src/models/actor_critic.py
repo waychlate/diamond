@@ -42,7 +42,14 @@ class ActorCritic(nn.Module):
         super().__init__()
         self.encoder = ActorCriticEncoder(cfg)
         self.lstm_dim = cfg.lstm_dim
-        input_dim_lstm = cfg.channels[-1] * (cfg.img_size // 2 ** (sum(cfg.down))) ** 2
+        
+        downsample_factor = 2 ** (sum(cfg.down))
+        if isinstance(cfg.img_size, int):
+            input_dim_lstm = cfg.channels[-1] * (cfg.img_size // downsample_factor) ** 2
+        else:
+            h, w = cfg.img_size
+            input_dim_lstm = cfg.channels[-1] * (h // downsample_factor) * (w // downsample_factor)
+            
         self.lstm = nn.LSTMCell(input_dim_lstm, cfg.lstm_dim)
         self.critic_linear = nn.Linear(cfg.lstm_dim, 1)
         self.actor_linear = nn.Linear(cfg.lstm_dim, cfg.num_actions)

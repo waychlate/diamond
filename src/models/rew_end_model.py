@@ -30,7 +30,14 @@ class RewEndModel(nn.Module):
         self.cfg = cfg
         self.encoder = RewEndEncoder(2 * cfg.img_channels, cfg.cond_channels, cfg.depths, cfg.channels, cfg.attn_depths)
         self.act_emb = nn.Embedding(cfg.num_actions, cfg.cond_channels)
-        input_dim_lstm = cfg.channels[-1] * (cfg.img_size // 2 ** (len(cfg.depths) - 1)) ** 2
+        
+        downsample_factor = 2 ** (len(cfg.depths) - 1)
+        if isinstance(cfg.img_size, int):
+            input_dim_lstm = cfg.channels[-1] * (cfg.img_size // downsample_factor) ** 2
+        else:
+            h, w = cfg.img_size
+            input_dim_lstm = cfg.channels[-1] * (h // downsample_factor) * (w // downsample_factor)
+            
         self.lstm = nn.LSTM(input_dim_lstm, cfg.lstm_dim, batch_first=True)
         self.head = nn.Sequential(
             nn.Linear(cfg.lstm_dim, cfg.lstm_dim),
