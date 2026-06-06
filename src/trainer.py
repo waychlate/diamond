@@ -333,6 +333,8 @@ class Trainer(StateDictMixin):
         to_log = []
         model_names = ["actor_critic"] if self._is_model_free else self._model_names
         for name in model_names:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             cfg = getattr(self._cfg, name).training
             if self.epoch > cfg.start_after_epochs:
                 steps = cfg.steps_first_epoch if self.epoch == 1 else cfg.steps_per_epoch
@@ -345,6 +347,8 @@ class Trainer(StateDictMixin):
         to_log = []
         model_names = [] if self._is_model_free else self._model_names[:-1]
         for name in model_names:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             cfg = getattr(self._cfg, name).training
             if self.epoch > cfg.start_after_epochs:
                 to_log += self.test_component(name)
