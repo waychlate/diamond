@@ -48,7 +48,7 @@ collection:
     num_final_episodes: 100
 
 static_dataset:
-  path: /blue/iruchkin/khek.do/dataset_mcts  # if specified, will disable train/test data collection
+  path: /home/khek.do/dataset_mcts  # if specified, will disable train/test data collection
   ignore_sample_weights: True
 
 training:
@@ -83,7 +83,7 @@ denoiser:
   training:
     num_autoregressive_steps: 1
     start_after_epochs: 0
-    steps_first_epoch: 1000
+    steps_first_epoch: 50000
     steps_per_epoch: 1000
     sample_weights: [0.1, 0.1, 0.1, 0.7]
     batch_size: 16
