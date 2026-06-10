@@ -1,0 +1,20 @@
+Job Start
+Fri Jun  5 08:31:39 PM EDT 2026
+c0606a-s13.ufhpc
+/home/khek.do/diamond
+---
+Starting on cuda:0
+wandb: Currently logged in as: khekdoa (khekdoa-university-of-florida). Use `wandb login --relogin` to force relogin
+wandb: wandb version 0.27.1 is available!  To upgrade, please run:
+wandb:  $ pip install wandb --upgrade
+wandb: Tracking run with wandb version 0.17.0
+wandb: Run data is saved locally in /home/khek.do/diamond/outputs/2026-06-05/20-31-48/wandb/run-20260605_203149-ifgh9g3d
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run generous-forest-8
+wandb: ⭐️ View project at https://wandb.ai/khekdoa-university-of-florida/diamond-src
+wandb: 🚀 View run at https://wandb.ai/khekdoa-university-of-florida/diamond-src/runs/ifgh9g3d
+/home/khek.do/diamond/src/data/dataset.py:143: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  self.load_state_dict(torch.load(self._default_path))
+/home/khek.do/diamond/.venv/lib/python3.11/site-packages/torch/utils/data/sampler.py:65: UserWarning: `data_source` argument is not used and will be removed in 2.2.0.You may still have custom implementation that utilizes it.
+  warnings.warn("`data_source` argument is not used and will be removed in 2.2.0."
+[2026-06-05T20:31:53.443] error: *** JOB 33980368 ON c0606a-s13 CANCELLED AT 2026-06-05T20:31:53 DUE to SIGNAL Terminated ***
