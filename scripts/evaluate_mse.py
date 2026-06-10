@@ -37,7 +37,8 @@ def evaluate_pure_mse(cfg: DictConfig, checkpoint_path: str, num_samples: int = 
     
     # We need sequences of length 'num_steps_conditioning + 1'
     # to have enough history to predict the next frame.
-    seq_len = cfg.agent.denoiser.inner_model.num_steps_conditioning
+    num_cond = cfg.agent.denoiser.inner_model.num_steps_conditioning
+    seq_len = num_cond + 1
     
     batch_sampler = BatchSampler(test_dataset, rank=0, world_size=1, batch_size=1, seq_length=seq_len, sample_weights=None)
     data_loader = DataLoader(test_dataset, batch_sampler=batch_sampler, collate_fn=collate_segments_to_batch)
@@ -59,16 +60,16 @@ def evaluate_pure_mse(cfg: DictConfig, checkpoint_path: str, num_samples: int = 
         except StopIteration:
             break
             
-        # batch.obs shape: (1, seq_len+1, 3, H, W)
-        # batch.act shape: (1, seq_len+1)
+        # batch.obs shape: (1, num_cond + 1, 3, H, W)
+        # batch.act shape: (1, num_cond + 1)
         
         obs = batch.obs.to(device)
         act = batch.act.to(device)
         
-        # We use the first 'seq_len' frames as history
+        # We use the first 'num_cond' frames as history
         # and try to predict the very last frame in the segment.
-        history_obs = obs[:, :-1] 
-        history_act = act[:, :-1]
+        history_obs = obs[:, :num_cond] 
+        history_act = act[:, :num_cond]
         ground_truth_next_obs = obs[:, -1] # The last frame (s_{t+1})
         
         # Predict next obs
@@ -96,7 +97,7 @@ if __name__ == "__main__":
     parser.add_argument("--samples", type=int, default=500, help="Number of test samples to average over")
     args = parser.parse_args()
 
-    with initialize(version_base="1.3", config_path="config"):
+    with initialize(version_base="1.3", config_path="../config"):
         cfg = compose(config_name="trainer")
         
     evaluate_pure_mse(cfg, args.checkpoint, args.samples)
