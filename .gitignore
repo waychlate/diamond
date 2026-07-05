@@ -2,6 +2,7 @@
 wandb
 .vscode
 outputs
+results/final_model
 results/figures
 experiments
 checkpoints
@@ -11,6 +12,9 @@ dataset_mcts
 *.tar.gz
 .venv
 slurm*
+visualizations
+logs
+*.pt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

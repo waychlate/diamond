@@ -36,6 +36,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fps", type=int, default=15, help="Frame rate.")
     parser.add_argument("--size", type=int, default=640, help="Window size.")
     parser.add_argument("--no-header", action="store_true")
+    parser.add_argument("-c", "--checkpoint", type=str, default=None, help="Path to state.pt checkpoint.")
+    parser.add_argument("--dataset", type=str, default="dataset_mcts", help="Path to dataset folder.")
+    parser.add_argument("--horizon", type=int, default=None, help="Imagination horizon.")
     return parser.parse_args()
 
 
@@ -79,28 +82,45 @@ def prepare_play_mode(cfg: DictConfig, args: argparse.Namespace) -> Tuple[PlayEn
         cfg.env = OmegaConf.load(download("atari_100k/config/env/atari.yaml"))
         cfg.env.train.id = cfg.env.test.id = f"{name}NoFrameskip-v4"
         cfg.world_model_env.horizon = 50
+    elif args.checkpoint is not None:
+        path_ckpt = Path(args.checkpoint)
     else:
         path_ckpt = get_path_agent_ckpt("checkpoints", epoch=-1)
+
+    if args.horizon is not None:
+        cfg.world_model_env.horizon = args.horizon
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Real envs
-    train_env = make_atari_env(num_envs=1, device=device, **cfg.env.train)
-    test_env = make_atari_env(num_envs=1, device=device, **cfg.env.test)
+    if cfg.env.keymap != "highway":
+        train_env = make_atari_env(num_envs=1, device=device, **cfg.env.train)
+        test_env = make_atari_env(num_envs=1, device=device, **cfg.env.test)
+        num_actions = test_env.num_actions
+    else:
+        train_env = None
+        test_env = None
+        num_actions = cfg.env.num_actions if "num_actions" in cfg.env else 5
 
     # Models
-    agent = Agent(instantiate(cfg.agent, num_actions=test_env.num_actions)).to(device).eval()
+    agent = Agent(instantiate(cfg.agent, num_actions=num_actions)).to(device).eval()
     agent.load(path_ckpt)
 
     # Collect for imagination's initialization
-    n = args.num_steps_initial_collect
-    dataset = Dataset(Path(f"dataset/{path_ckpt.stem}_{n}"))
-    dataset.load_from_default_path()
-    if len(dataset) == 0:
-        print(f"Collecting {n} steps in real environment for world model initialization.")
-        collector = make_collector(test_env, agent.actor_critic, dataset, epsilon=0)
-        collector.send(NumToCollect(steps=n))
-        dataset.save_to_default_path()
+    if cfg.env.keymap == "highway":
+        dataset_path = Path(args.dataset) / "test"
+        dataset = Dataset(dataset_path)
+        dataset.load_from_default_path()
+        assert len(dataset) > 0, f"Local dataset at {dataset_path} not found or empty."
+    else:
+        n = args.num_steps_initial_collect
+        dataset = Dataset(Path(f"dataset/{path_ckpt.stem}_{n}"))
+        dataset.load_from_default_path()
+        if len(dataset) == 0:
+            print(f"Collecting {n} steps in real environment for world model initialization.")
+            collector = make_collector(test_env, agent.actor_critic, dataset, epsilon=0)
+            collector.send(NumToCollect(steps=n))
+            dataset.save_to_default_path()
 
     # World model environment
     bs = BatchSampler(dataset, 0, 1, 1, cfg.agent.denoiser.inner_model.num_steps_conditioning, None, False)
@@ -108,11 +128,11 @@ def prepare_play_mode(cfg: DictConfig, args: argparse.Namespace) -> Tuple[PlayEn
     wm_env_cfg = instantiate(cfg.world_model_env, num_batches_to_preload=1)
     wm_env = WorldModelEnv(agent.denoiser, agent.rew_end_model, dl, wm_env_cfg, return_denoising_trajectory=True)
 
-    envs = [
-        NamedEnv("wm", wm_env),
-        NamedEnv("test", test_env),
-        NamedEnv("train", train_env),
-    ]
+    envs = [NamedEnv("wm", wm_env)]
+    if train_env is not None:
+        envs.append(NamedEnv("train", train_env))
+    if test_env is not None:
+        envs.append(NamedEnv("test", test_env))
 
     env_keymap, env_action_names = get_keymap_and_action_names(cfg.env.keymap)
     play_env = PlayEnv(
@@ -139,8 +159,17 @@ def main():
         cfg = compose(config_name="trainer")
 
     env, keymap = prepare_dataset_mode(cfg) if args.dataset_mode else prepare_play_mode(cfg, args)
-    size = (args.size // cfg.env.train.size) * cfg.env.train.size  # window size
-    game = Game(env, keymap, (size, size), fps=args.fps, verbose=not args.no_header)
+    
+    # Calculate window size based on screen dimensions config
+    if isinstance(cfg.env.train.size, int):
+        size = (args.size // cfg.env.train.size) * cfg.env.train.size
+        window_size = (size, size)
+    else:
+        h, w = cfg.env.train.size
+        scale = max(1, args.size // w)
+        window_size = (h * scale, w * scale)
+        
+    game = Game(env, keymap, window_size, fps=args.fps, verbose=not args.no_header)
     game.run()
 
 

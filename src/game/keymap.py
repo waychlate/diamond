@@ -18,6 +18,9 @@ def get_keymap_and_action_names(name: str) -> Tuple[Keymap, ActionNames]:
     if name == "atari":
         return ATARI_KEYMAP, ATARI_ACTION_NAMES
 
+    if name == "highway":
+        return HIGHWAY_KEYMAP, HIGHWAY_ACTION_NAMES
+
     assert name.startswith("atari/")
     env_id = name.split("atari/")[1]
     action_names = [x.lower() for x in gymnasium.make(env_id).unwrapped.get_action_meanings()]
@@ -70,7 +73,25 @@ ATARI_KEYMAP = {
     (pygame.K_w, pygame.K_a, pygame.K_SPACE): 15,
     (pygame.K_s, pygame.K_d, pygame.K_SPACE): 16,
     (pygame.K_s, pygame.K_a, pygame.K_SPACE): 17,
+}
 
+HIGHWAY_ACTION_NAMES = [
+    "LANE_LEFT",
+    "IDLE",
+    "LANE_RIGHT",
+    "FASTER",
+    "SLOWER",
+]
+
+HIGHWAY_KEYMAP = {
+    (pygame.K_a,): 0,
+    (pygame.K_LEFT,): 0,
+    (pygame.K_d,): 2,
+    (pygame.K_RIGHT,): 2,
+    (pygame.K_w,): 3,
+    (pygame.K_UP,): 3,
+    (pygame.K_s,): 4,
+    (pygame.K_DOWN,): 4,
 }
 
 DATASET_MODE_ACTION_NAMES = [

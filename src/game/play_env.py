@@ -36,6 +36,7 @@ class PlayEnv:
         self.store_denoising_trajectory = store_denoising_trajectory
         self.store_original_obs = store_original_obs
         self.is_human_player = False
+        self.fallback_action = 1 if len(action_names) == 5 and action_names[1] == "IDLE" else 0
         self.env_id = 0
         self.env_name, self.env = self.envs[0]
         self.obs, self.t, self.return_, self.hx_cx, self.ckpt_id, self.buffer, self.rec_dataset = (None,) * 7

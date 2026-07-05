@@ -76,7 +76,7 @@ class Game:
 
         while not should_stop:
             do_one_step = False
-            action = 0  # noop
+            action = getattr(self.env, "fallback_action", 0)
             pygame.event.pump()
 
             for event in pygame.event.get():
@@ -99,25 +99,31 @@ class Game:
                 if event.key == pygame.K_m:
                     do_reset = self.env.next_mode()
 
-                if event.key == pygame.K_UP:
-                    do_reset = self.env.next_axis_1()
+                is_arrow = event.key in [pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT]
+                is_mapped = any(event.key in keys for keys in self.keymap.keys())
 
-                if event.key == pygame.K_DOWN:
-                    do_reset = self.env.prev_axis_1()
+                if is_arrow and not is_mapped:
+                    if event.key == pygame.K_UP:
+                        do_reset = self.env.next_axis_1()
+                    elif event.key == pygame.K_DOWN:
+                        do_reset = self.env.prev_axis_1()
+                    elif event.key == pygame.K_RIGHT:
+                        do_reset = self.env.next_axis_2()
+                    elif event.key == pygame.K_LEFT:
+                        do_reset = self.env.prev_axis_2()
 
-                if event.key == pygame.K_RIGHT:
-                    do_reset = self.env.next_axis_2()
+                if getattr(self.env, "fallback_action", 0) == 1:
+                    for keys, act_val in self.keymap.items():
+                        if len(keys) == 1 and event.key == keys[0]:
+                            action = act_val
 
-                if event.key == pygame.K_LEFT:
-                    do_reset = self.env.prev_axis_2()
-
-            if action == 0:
+            if action == getattr(self.env, "fallback_action", 0) and getattr(self.env, "fallback_action", 0) != 1:
                 pressed = pygame.key.get_pressed()
                 for keys, action in self.keymap.items():
                     if all([pressed[key] for key in keys]):
                         break
                 else:
-                    action = 0
+                    action = getattr(self.env, "fallback_action", 0)
 
             if do_reset:
                 reset()
