@@ -3,6 +3,7 @@ import sys
 import argparse
 from pathlib import Path
 import torch
+import torch.nn.functional as F
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
@@ -70,7 +71,7 @@ def evaluate_diamond_ttc(
             ttc_predictor.load_state_dict(checkpoint)
         print("TTC Predictor weights loaded successfully.")
     else:
-        print(f"Warning: {ttc_model_path} not found. Proceeding with initialized weights for structure verification.")
+        print(f"Warning: {ttc_model_path} not found. Proceeding with initial weights for rollout structure.")
 
     # 3. Setup Dataset
     test_dataset_path = Path(dataset_path) / "test"
@@ -90,7 +91,12 @@ def evaluate_diamond_ttc(
     print(f"\nStarting DIAMOND Rollout & TTC Prediction over {num_episodes} episodes...")
     data_iterator = iter(data_loader)
     
-    all_step_errors = [[] for _ in range(rollout_steps)]
+    # Track errors per lookahead step (1..rollout_steps)
+    step_maes = [[] for _ in range(rollout_steps)]
+    step_mses = [[] for _ in range(rollout_steps)]
+    
+    mean = torch.tensor([0.485, 0.456, 0.406], device=device).view(1, 3, 1, 1)
+    std = torch.tensor([0.229, 0.224, 0.225], device=device).view(1, 3, 1, 1)
     
     for ep_idx in range(num_episodes):
         try:
@@ -110,7 +116,6 @@ def evaluate_diamond_ttc(
         print(f"\nEpisode {ep_idx + 1}/{num_episodes}: Generating {rollout_steps}-step rollout...")
         for step in range(rollout_steps):
             curr_act = act[:, num_cond + step - 1 : num_cond + step]
-            # Input to sampler expects history_obs, history_act
             next_obs, _ = sampler.sample(history_obs, history_act)
             generated_obs_list.append(next_obs)
             
@@ -120,18 +125,16 @@ def evaluate_diamond_ttc(
             
         generated_obs_seq = torch.stack(generated_obs_list, dim=1) # (1, num_cond + rollout_steps, 3, H, W)
         
-        # Plot generated vs ground truth frame sample
+        # Save side-by-side rollout frame comparison
         fig, axes = plt.subplots(2, 5, figsize=(15, 6))
         for i in range(5):
             idx = num_cond + i * (rollout_steps // 5)
-            # Ground truth
             gt_img = obs[0, idx].permute(1, 2, 0).cpu().numpy()
             gt_img = np.clip((gt_img + 1.0) / 2.0, 0.0, 1.0)
             axes[0, i].imshow(gt_img)
             axes[0, i].set_title(f"GT Step {idx}")
             axes[0, i].axis("off")
             
-            # DIAMOND Rollout
             gen_img = generated_obs_seq[0, idx].permute(1, 2, 0).cpu().numpy()
             gen_img = np.clip((gen_img + 1.0) / 2.0, 0.0, 1.0)
             axes[1, i].imshow(gen_img)
@@ -144,6 +147,21 @@ def evaluate_diamond_ttc(
         plt.savefig(save_plot_path)
         plt.close()
         print(f"Saved rollout visualization to {save_plot_path}")
+
+    # Plot Horizon Error Curve (MAE vs Lookahead Step)
+    if any(len(errs) > 0 for errs in step_maes):
+        avg_maes = [np.mean(errs) if len(errs) > 0 else 0.0 for errs in step_maes]
+        plt.figure(figsize=(10, 5))
+        plt.plot(range(1, rollout_steps + 1), avg_maes, marker='o', linewidth=2, color='crimson')
+        plt.title("Horizon of Predictability: TTC Prediction Error vs Lookahead Step")
+        plt.xlabel("Lookahead Step (+N steps into future rollout)")
+        plt.ylabel("TTC Error MAE (Seconds)")
+        plt.grid(True, linestyle='--', alpha=0.6)
+        plt.tight_layout()
+        horizon_plot_path = os.path.join(output_dir, "ttc_horizon_error.png")
+        plt.savefig(horizon_plot_path)
+        plt.close()
+        print(f"\nSaved Horizon Error Plot to {horizon_plot_path}")
 
     print("\nDIAMOND + TTC Evaluation Complete!")
 
