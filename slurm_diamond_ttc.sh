@@ -26,8 +26,8 @@ source .venv/bin/activate
 # Execute DIAMOND visual rollout + TTC Trajectory evaluation
 python scripts/evaluate_diamond_ttc.py \
     --checkpoint diamond_highway_mcts.pt \
-    --ttc-model /home/khek.do/TTC-Prediction/best_model.pth \
-    --dataset_path dataset_mcts \
+    --ttc-model /home/khek.do/diamond/best_model.pth \
+    --dataset_path /blue/iruchkin/khek.do/dataset_episodes_1000 \
     --episodes 10 \
     --rollout_steps 30 \
     --output_dir visualizations/diamond_ttc_rollouts
