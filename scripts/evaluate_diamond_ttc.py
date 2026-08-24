@@ -91,8 +91,8 @@ def evaluate_diamond_ttc(
                 sd = ckpt["model_state_dict"] if isinstance(ckpt, dict) and "model_state_dict" in ckpt else ckpt
                 ttc_predictor.load_state_dict(sd)
                 print("Video TTC Predictor weights loaded.")
-        except ImportError:
-            print("VideoTTCPredictor not found, defaulting to latent mode.")
+        except (ImportError, ModuleNotFoundError):
+            print("Legacy VideoTTCPredictor not found, defaulting to latent mode.")
 
     # 3. Setup Dataset
     test_dataset_path = Path(dataset_path) / "test"
