@@ -4,7 +4,7 @@ import argparse
 import pandas as pd
 import numpy as np
 import torch
-import torchvision.transforms.functional as TF
+import torch.nn.functional as F
 from pathlib import Path
 from tqdm import tqdm
 
@@ -69,20 +69,11 @@ def convert_data(src_dir, dst_dir):
 
             # --- Image Processing (Crop, Resize, Normalize & Permute) ---
             # 1. Convert numpy visuals to float PyTorch tensor in [0.0, 1.0] and shape (T, C, H, W)
-            frames = torch.from_numpy(visuals).float() / 255.0
-            frames = frames.permute(0, 3, 1, 2)
-
-            processed_frames = []
-            for t in range(T):
-                frame = frames[t]
-                # Crop top=60, left=0, height=90, width=600
-                cropped_frame = TF.crop(frame, top=60, left=0, height=90, width=600)
-                # Resize to (48, 320)
-                squeezed_frame = TF.resize(cropped_frame, size=[48, 320], antialias=True)
-                processed_frames.append(squeezed_frame)
-
-            # Stack to get (T, C, H, W) tensor and shift range from [0, 1] to [-1, 1]
-            obs_all = torch.stack(processed_frames).mul(2.0).sub(1.0)
+            frames = torch.from_numpy(visuals).float().div(255.0).permute(0, 3, 1, 2)
+            # Crop top=60, left=0, height=90, width=600 -> [:, :, 60:150, 0:600]
+            cropped = frames[:, :, 60:150, 0:600]
+            # Resize to (48, 320) and shift range from [0, 1] to [-1, 1]
+            obs_all = F.interpolate(cropped, size=(48, 320), mode="bilinear", align_corners=False).mul(2.0).sub(1.0)
 
             # --- Construct DIAMOND Episode ---
             # 1. Observations: first T-1 processed frames (shape: T-1, C, H, W)
