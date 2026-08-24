@@ -76,6 +76,10 @@ class Denoiser(nn.Module):
         rescaled_noise = noisy_next_obs * cs.c_in
         return self.inner_model(rescaled_noise, cs.c_noise, rescaled_obs, act)
     
+    def extract_latent(self, obs: Tensor, act: Tensor) -> Tensor:
+        rescaled_obs = obs / self.cfg.sigma_data
+        return self.inner_model.extract_latent(rescaled_obs, act)
+    
     @torch.no_grad()
     def wrap_model_output(self, noisy_next_obs: Tensor, model_output: Tensor, cs: Conditioners) -> Tensor:
         d = cs.c_skip * noisy_next_obs + cs.c_out * model_output

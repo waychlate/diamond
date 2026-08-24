@@ -41,9 +41,24 @@ class InnerModel(nn.Module):
         self.conv_out = Conv3x3(cfg.channels[0], cfg.img_channels)
         nn.init.zeros_(self.conv_out.weight)
 
+    def extract_latent(self, obs: Tensor, act: Tensor) -> Tensor:
+        if obs.ndim == 5:
+            b, t, c, h, w = obs.shape
+            obs = obs.reshape(b, t * c, h, w)
+        else:
+            b, _, h, w = obs.shape
+
+        dummy_c_noise = torch.zeros(b, device=obs.device, dtype=obs.dtype)
+        cond = self.cond_proj(self.noise_emb(dummy_c_noise) + self.act_emb(act))
+
+        dummy_next = torch.zeros(b, self.cfg.img_channels, h, w, device=obs.device, dtype=obs.dtype)
+        x = self.conv_in(torch.cat((obs, dummy_next), dim=1))
+        return self.unet.encode(x, cond)
+
     def forward(self, noisy_next_obs: Tensor, c_noise: Tensor, obs: Tensor, act: Tensor) -> Tensor:
         cond = self.cond_proj(self.noise_emb(c_noise) + self.act_emb(act))
         x = self.conv_in(torch.cat((obs, noisy_next_obs), dim=1))
         x, _, _ = self.unet(x, cond)
         x = self.conv_out(F.silu(self.norm_out(x)))
         return x
+
