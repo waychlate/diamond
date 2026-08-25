@@ -295,7 +295,7 @@ if __name__ == "__main__":
     parser.add_argument("--dt", type=float, default=0.1, help="Delta time per step in seconds (default: 0.1s for 10Hz)")
     parser.add_argument("--max_ttc", type=float, default=None, help="Max TTC cap in seconds (if None, auto-calculated from dataset)")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate")
-    parser.add_argument("--num_workers", type=int, default=4, help="DataLoader num workers")
+    parser.add_argument("--num_workers", type=int, default=0, help="DataLoader num workers (default: 0 for single-process memory safety)")
     parser.add_argument("--device", type=str, default="cuda", help="Device (cuda or cpu)")
     
     args = parser.parse_args()
