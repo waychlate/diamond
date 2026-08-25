@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -54,7 +55,23 @@ class InnerModel(nn.Module):
 
         dummy_next = torch.zeros(b, self.cfg.img_channels, h, w, device=obs.device, dtype=obs.dtype)
         x = self.conv_in(torch.cat((obs, dummy_next), dim=1))
-        return self.unet.encode(x, cond)
+
+        if hasattr(self.unet, "encode"):
+            return self.unet.encode(x, cond)
+        else:
+            *_, h_x, w_x = x.size()
+            n = self.unet._num_down
+            padding_h = math.ceil(h_x / 2 ** n) * 2 ** n - h_x
+            padding_w = math.ceil(w_x / 2 ** n) * 2 ** n - w_x
+            x = F.pad(x, (0, padding_w, 0, padding_h))
+
+            for block, down in zip(self.unet.d_blocks, self.unet.downsamples):
+                x_down = down(x)
+                x, _ = block(x_down, cond)
+
+            x, _ = self.unet.mid_blocks(x, cond)
+            return x
+
 
     def forward(self, noisy_next_obs: Tensor, c_noise: Tensor, obs: Tensor, act: Tensor) -> Tensor:
         cond = self.cond_proj(self.noise_emb(c_noise) + self.act_emb(act))

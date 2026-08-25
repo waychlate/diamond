@@ -168,14 +168,18 @@ def train_latent_ttc(args):
     os.makedirs(os.path.dirname(args.save_path) or ".", exist_ok=True)
     best_val_mae = float("inf")
     
-    print(f"\nStarting training for {args.epochs} epochs with context_len={args.context_len} frames...")
+    train_iter = iter(train_loader)
+    val_iter = iter(val_loader)
+    val_steps = max(10, args.steps_per_epoch // 5)
+
+    print(f"\nStarting training for {args.epochs} epochs ({args.steps_per_epoch} steps/epoch) with context_len={args.context_len} frames...")
     for epoch in range(1, args.epochs + 1):
         ttc_head.train()
         train_loss_total = 0.0
-        train_steps = 0
         
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{args.epochs} [Train]")
-        for batch in pbar:
+        pbar = tqdm(range(args.steps_per_epoch), desc=f"Epoch {epoch}/{args.epochs} [Train]")
+        for _ in pbar:
+            batch = next(train_iter)
             obs = batch.obs.to(device)  # (B, seq_len, 3, H, W)
             act = batch.act.to(device)  # (B, seq_len)
             
@@ -207,11 +211,10 @@ def train_latent_ttc(args):
             optimizer.step()
             
             train_loss_total += loss.item()
-            train_steps += 1
             pbar.set_postfix({"loss": f"{loss.item():.4f}"})
             
         scheduler.step()
-        avg_train_loss = train_loss_total / max(1, train_steps)
+        avg_train_loss = train_loss_total / max(1, args.steps_per_epoch)
         
         # --- Validation Loop ---
         ttc_head.eval()
@@ -220,7 +223,8 @@ def train_latent_ttc(args):
         val_samples = 0
         
         with torch.no_grad():
-            for batch in val_loader:
+            for _ in range(val_steps):
+                batch = next(val_iter)
                 obs = batch.obs.to(device)
                 act = batch.act.to(device)
                 
@@ -282,6 +286,7 @@ if __name__ == "__main__":
     parser.add_argument("--dataset_path", type=str, default="dataset_mcts", help="Path to processed DIAMOND dataset")
     parser.add_argument("--save_path", type=str, default="checkpoints/best_latent_ttc.pt", help="Output path for trained TTC weights")
     parser.add_argument("--epochs", type=int, default=50, help="Number of training epochs")
+    parser.add_argument("--steps_per_epoch", type=int, default=100, help="Number of batches/steps per epoch (default: 100)")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--hidden_dim", type=int, default=128, help="Hidden dimension for LatentTTCHead")
