@@ -44,6 +44,7 @@ python scripts/train_latent_ttc.py \
     --hidden_dim 128 \
     --context_len 20 \
     --dt 0.1 \
+    --max_ttc 5.0 \
     --dropout 0.1 \
     --device cuda
 
@@ -56,6 +57,8 @@ python scripts/evaluate_diamond_ttc.py \
     --mode latent \
     --episodes 10 \
     --rollout_steps 30 \
+    --dt 0.1 \
+    --max_ttc 5.0 \
     --output_dir visualizations/latent_ttc_eval
 
 echo "Job End"

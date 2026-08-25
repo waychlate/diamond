@@ -82,18 +82,15 @@ def calculate_dataset_max_ttc(dataset: Dataset, dt: float = 0.1, fallback_max: f
                 crash_idx = crashes[0].item()
                 if crash_idx > max_steps_observed:
                     max_steps_observed = crash_idx
-            else:
-                if len(ep) > max_steps_observed:
-                    max_steps_observed = len(ep)
         except Exception:
             continue
             
-    if max_steps_observed > 0:
+    if total_collisions > 0 and max_steps_observed > 0:
         max_ttc = float(max_steps_observed * dt)
         print(f"Computed dataset max TTC: {max_ttc:.2f}s ({max_steps_observed} steps, {total_collisions} crash episodes inspected).")
         return max_ttc
     else:
-        print(f"Using fallback max TTC: {fallback_max:.2f}s")
+        print(f"No crashes detected in sample; using default max TTC: {fallback_max:.2f}s")
         return fallback_max
 
 
@@ -149,7 +146,7 @@ def train_latent_ttc(args):
     else:
         max_ttc = calculate_dataset_max_ttc(train_dataset, dt=args.dt)
         
-    seq_len = num_cond + args.rollout_seq_len
+    seq_len = num_cond + args.context_len
     train_sampler = BatchSampler(train_dataset, rank=0, world_size=1, batch_size=args.batch_size, seq_length=seq_len, sample_weights=None)
     train_loader = DataLoader(train_dataset, batch_sampler=train_sampler, collate_fn=collate_segments_to_batch, num_workers=args.num_workers)
     

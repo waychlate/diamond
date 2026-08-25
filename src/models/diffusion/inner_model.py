@@ -23,6 +23,7 @@ class InnerModelConfig:
 class InnerModel(nn.Module):
     def __init__(self, cfg: InnerModelConfig) -> None:
         super().__init__()
+        self.cfg = cfg
         self.noise_emb = FourierFeatures(cfg.cond_channels)
         self.act_emb = nn.Sequential(
             nn.Embedding(cfg.num_actions, cfg.cond_channels // cfg.num_steps_conditioning),
