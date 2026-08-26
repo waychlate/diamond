@@ -65,6 +65,31 @@ def compute_ttc_targets_for_batch(
     return targets, valid_masks
 
 
+def extract_latents_for_sequence(
+    agent: Agent,
+    obs: torch.Tensor,
+    act: torch.Tensor,
+    num_cond: int,
+    context_len: int
+) -> torch.Tensor:
+    """
+    Extracts latents across all time steps in a sequence in a single batched pass.
+    obs: (B, seq_len, 3, H, W)
+    act: (B, seq_len)
+    Returns: (B, context_len, C, H_mid, W_mid)
+    """
+    b, seq_len, c, h, w = obs.shape
+    windows_obs = torch.stack([obs[:, t : t + num_cond] for t in range(context_len)], dim=1)
+    windows_act = torch.stack([act[:, t : t + num_cond] for t in range(context_len)], dim=1)
+    
+    flat_obs = windows_obs.reshape(b * context_len, num_cond, c, h, w)
+    flat_act = windows_act.reshape(b * context_len, num_cond)
+    
+    flat_z = agent.denoiser.extract_latent(flat_obs, flat_act)
+    _, c_mid, h_mid, w_mid = flat_z.shape
+    return flat_z.reshape(b, context_len, c_mid, h_mid, w_mid)
+
+
 def calculate_dataset_max_ttc(dataset: Dataset, dt: float = 0.1, fallback_max: float = 5.0) -> float:
     """
     Scans the dataset to determine the maximum collision horizon observed.
@@ -167,13 +192,31 @@ def train_latent_ttc(args):
     
     os.makedirs(os.path.dirname(args.save_path) or ".", exist_ok=True)
     best_val_mae = float("inf")
+    start_epoch = 1
+
+    # Checkpoint Auto-Resume
+    if args.resume and os.path.exists(args.save_path):
+        print(f"Loading checkpoint to resume from {args.save_path}...")
+        try:
+            ckpt = torch.load(args.save_path, map_location=device)
+            if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
+                ttc_head.load_state_dict(ckpt["model_state_dict"])
+                if "optimizer_state_dict" in ckpt:
+                    optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+                best_val_mae = ckpt.get("val_mae", float("inf"))
+                start_epoch = ckpt.get("epoch", 0) + 1
+                for _ in range(start_epoch - 1):
+                    scheduler.step()
+                print(f"--> Resumed from epoch {start_epoch}/{args.epochs} (Best Val MAE so far: {best_val_mae:.4f}s)")
+        except Exception as e:
+            print(f"Warning: Failed to resume checkpoint from {args.save_path} ({e}). Starting fresh.")
     
     train_iter = iter(train_loader)
     val_iter = iter(val_loader)
     val_steps = max(10, args.steps_per_epoch // 5)
 
-    print(f"\nStarting training for {args.epochs} epochs ({args.steps_per_epoch} steps/epoch) with context_len={args.context_len} frames...")
-    for epoch in range(1, args.epochs + 1):
+    print(f"\nStarting training from epoch {start_epoch} to {args.epochs} ({args.steps_per_epoch} steps/epoch) with context_len={args.context_len} frames...")
+    for epoch in range(start_epoch, args.epochs + 1):
         ttc_head.train()
         train_loss_total = 0.0
         
@@ -188,16 +231,9 @@ def train_latent_ttc(args):
             targets = targets.to(device)
             masks = masks.to(device)
             
-            # Extract latents across the 20-frame context window
-            latents_list = []
+            # Fast vectorized latent extraction across the 20-frame context window
             with torch.no_grad():
-                for step in range(args.context_len):
-                    w_obs = obs[:, step : step + num_cond]
-                    w_act = act[:, step : step + num_cond]
-                    z = agent.denoiser.extract_latent(w_obs, w_act)  # (B, C, H_mid, W_mid)
-                    latents_list.append(z)
-                    
-            latents_seq = torch.stack(latents_list, dim=1)  # (B, context_len, C, H, W)
+                latents_seq = extract_latents_for_sequence(agent, obs, act, num_cond, args.context_len)
             
             # Forward pass through LatentTTCHead
             pred_ttc, _ = ttc_head(latents_seq)  # (B, context_len, 1)
@@ -232,14 +268,7 @@ def train_latent_ttc(args):
                 targets = targets.to(device)
                 masks = masks.to(device)
                 
-                latents_list = []
-                for step in range(args.context_len):
-                    w_obs = obs[:, step : step + num_cond]
-                    w_act = act[:, step : step + num_cond]
-                    z = agent.denoiser.extract_latent(w_obs, w_act)
-                    latents_list.append(z)
-                latents_seq = torch.stack(latents_list, dim=1)
-                
+                latents_seq = extract_latents_for_sequence(agent, obs, act, num_cond, args.context_len)
                 pred_ttc, _ = ttc_head(latents_seq)
                 
                 valid_preds = pred_ttc[masks]
@@ -293,12 +322,11 @@ if __name__ == "__main__":
     parser.add_argument("--context_len", type=int, default=20, help="Number of history frames / steps observed (default: 20)")
     parser.add_argument("--no_lstm", action="store_true", help="Disable temporal LSTM (defaults to using LSTM for 20 frames)")
     parser.add_argument("--dt", type=float, default=0.1, help="Delta time per step in seconds (default: 0.1s for 10Hz)")
-    parser.add_argument("--max_ttc", type=float, default=None, help="Max TTC cap in seconds (if None, auto-calculated from dataset)")
+    parser.add_argument("--max_ttc", type=float, default=5.0, help="Max TTC cap in seconds (default: 5.0s)")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate")
     parser.add_argument("--num_workers", type=int, default=0, help="DataLoader num workers (default: 0 for single-process memory safety)")
+    parser.add_argument("--resume", action="store_true", default=True, help="Auto-resume from existing save_path checkpoint if found (default: True)")
     parser.add_argument("--device", type=str, default="cuda", help="Device (cuda or cpu)")
     
     args = parser.parse_args()
     train_latent_ttc(args)
-
-

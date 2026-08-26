@@ -7,11 +7,9 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=48gb
+#SBATCH --mem=32gb
 #SBATCH --gres=gpu:1
 #SBATCH --time=12:00:00
-
-set -e  # Exit immediately if a command exits with a non-zero status
 
 echo "Job Start"
 date; hostname; pwd
@@ -29,6 +27,11 @@ cd /home/khek.do/diamond
 
 source .venv/bin/activate
 
+# 1. (Optional) Convert raw dataset if not already converted
+# python scripts/convert_and_process.py \
+#     --src_dir /blue/iruchkin/khek.do/dataset_episodes_1000 \
+#     --dst_dir /blue/iruchkin/khek.do/diamond_dataset_mcts
+
 # 1. Train Latent TTC Head directly from DIAMOND UNet bottleneck features
 echo "--- Starting Latent TTC Head Training ---"
 python scripts/train_latent_ttc.py \
@@ -36,7 +39,6 @@ python scripts/train_latent_ttc.py \
     --dataset_path /blue/iruchkin/khek.do/diamond_dataset_1000 \
     --save_path checkpoints/best_latent_ttc.pt \
     --epochs 50 \
-    --steps_per_epoch 100 \
     --batch_size 32 \
     --lr 1e-4 \
     --hidden_dim 128 \
@@ -44,7 +46,6 @@ python scripts/train_latent_ttc.py \
     --dt 0.1 \
     --max_ttc 5.0 \
     --dropout 0.1 \
-    --num_workers 0 \
     --device cuda
 
 # 2. Evaluate Latent TTC Model across rollout horizons
