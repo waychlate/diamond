@@ -140,13 +140,18 @@ def evaluate_diamond_ttc(
         gt_ttc_list = []
         hx_cx = None
         
+        has_obs_ttc = hasattr(batch, "info") and isinstance(batch.info, dict) and "obs_ttc" in batch.info
+        
         print(f"\nEpisode {ep_idx + 1}/{num_episodes}: Evaluating {rollout_steps}-step horizon...")
         for step in range(rollout_steps):
             curr_idx = num_cond + step - 1
             curr_act = act[:, curr_idx : curr_idx + 1]
             
             # Ground truth TTC
-            if has_crash and curr_idx <= crash_idx:
+            if has_obs_ttc:
+                raw_val = float(batch.info["obs_ttc"][0, curr_idx].item())
+                true_ttc = min(max(raw_val, 0.0), max_ttc)
+            elif has_crash and curr_idx <= crash_idx:
                 true_ttc = min((crash_idx - curr_idx) * dt, max_ttc)
             else:
                 true_ttc = max_ttc

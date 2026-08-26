@@ -31,13 +31,7 @@ def compute_ttc_targets_for_batch(
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Computes ground truth TTC targets for each step in a batch after conditioning.
-    batch.end: (B, seq_len)
-    batch.trunc: (B, seq_len)
-    batch.mask_padding: (B, seq_len)
-    
-    Returns:
-        targets: (B, num_valid_steps, 1)
-        masks: (B, num_valid_steps) boolean valid mask
+    Uses continuous obs_ttc from batch.info if present, otherwise falls back to step-counting.
     """
     b, seq_len = batch.end.shape
     num_targets = seq_len - num_cond
@@ -46,21 +40,28 @@ def compute_ttc_targets_for_batch(
     targets = torch.full((b, num_targets, 1), max_ttc, dtype=torch.float32, device=device)
     valid_masks = batch.mask_padding[:, num_cond:].clone()
     
-    # Calculate TTC per episode segment in batch
-    for i in range(b):
-        end_seq = batch.end[i]
-        crash_indices = torch.where(end_seq == 1)[0]
-        
-        has_crash = len(crash_indices) > 0
-        crash_idx = crash_indices[0].item() if has_crash else -1
-        
+    has_obs_ttc = hasattr(batch, "info") and isinstance(batch.info, dict) and "obs_ttc" in batch.info
+    
+    if has_obs_ttc:
+        raw_ttc = batch.info["obs_ttc"].to(device)  # (B, seq_len)
         for step in range(num_targets):
-            curr_idx = num_cond + step - 1  # transition index
-            if has_crash and curr_idx <= crash_idx:
-                ttc_seconds = (crash_idx - curr_idx) * dt
-                targets[i, step, 0] = min(ttc_seconds, max_ttc)
-            else:
-                targets[i, step, 0] = max_ttc
+            curr_idx = num_cond + step - 1
+            targets[:, step, 0] = torch.clamp(raw_ttc[:, curr_idx], min=0.0, max=max_ttc)
+    else:
+        # Fallback: step-counting until crash
+        for i in range(b):
+            end_seq = batch.end[i]
+            crash_indices = torch.where(end_seq == 1)[0]
+            has_crash = len(crash_indices) > 0
+            crash_idx = crash_indices[0].item() if has_crash else -1
+            
+            for step in range(num_targets):
+                curr_idx = num_cond + step - 1
+                if has_crash and curr_idx <= crash_idx:
+                    ttc_seconds = (crash_idx - curr_idx) * dt
+                    targets[i, step, 0] = min(ttc_seconds, max_ttc)
+                else:
+                    targets[i, step, 0] = max_ttc
 
     return targets, valid_masks
 

@@ -83,29 +83,21 @@ def convert_data(src_dir, dst_dir):
             act = torch.from_numpy(df.action.values[:T-1].astype(np.int64))
             rew = torch.from_numpy(df.reward.values[:T-1].astype(np.float32))
             
-            # 3. Termination Flags
-            done_values = df.done.values[:T-1]
-            if done_values.dtype == bool:
-                end = torch.from_numpy(done_values.astype(np.uint8))
+            # 3. Termination & Crash Flags
+            if "crashed" in df:
+                crashed_values = (df.crashed.values[:T-1] == 1)
             else:
-                end = torch.from_numpy((done_values == True).astype(np.uint8))
+            end = torch.from_numpy((crashed_values | done_values).astype(np.uint8))
             
-            # Truncation: if the episode ended without 'done' (e.g. timeout at step 100)
-            trunc = torch.zeros_like(end)
-            if not end[-1]:
-                trunc[-1] = 1
                 
-            # 4. Info block with final_observation (the T-th processed frame)
-            info = {
-                "final_observation": obs_all[T-1]
-            }
-            
-            # 5. Create and Add Episode (Dataset.add_episode handles compressing back to uint8 on disk)
+            # 4. Info block with final_observation, obs_ttc, and crashed
+                raw_ttc = df.obs_ttc.values[:T-1].astype(np.float32)
+                # Clean any negative or invalid values (e.g. -1 meaning no lead vehicle -> map to 5.0s)
+                raw_ttc = np.where((raw_ttc < 0) | np.isnan(raw_ttc), 5.0, raw_ttc)
+                obs_ttc_tensor = torch.from_numpy(raw_ttc)
+            else:
             episode = Episode(obs, act, rew, end, trunc, info)
             dataset.add_episode(episode)
-            
-        # Finalize dataset metadata
-        dataset.save_to_default_path()
         print(f"Finished {split} split. {dataset}")
 
 if __name__ == "__main__":
