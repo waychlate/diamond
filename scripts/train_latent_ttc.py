@@ -38,12 +38,24 @@ def compute_ttc_targets_for_batch(
     device = batch.end.device
     
     targets = torch.full((b, num_targets, 1), max_ttc, dtype=torch.float32, device=device)
-    valid_masks = batch.mask_padding[:, num_cond:].clone()
+    valid_masks = batch.mask_padding[:, num_cond - 1 : num_cond - 1 + num_targets].clone()
     
-    has_obs_ttc = hasattr(batch, "info") and isinstance(batch.info, dict) and "obs_ttc" in batch.info
+    has_obs_ttc_list = (
+        hasattr(batch, "info")
+        and isinstance(batch.info, (list, tuple))
+        and len(batch.info) > 0
+        and isinstance(batch.info[0], dict)
+        and "obs_ttc" in batch.info[0]
+    )
+    has_obs_ttc_dict = hasattr(batch, "info") and isinstance(batch.info, dict) and "obs_ttc" in batch.info
     
-    if has_obs_ttc:
-        raw_ttc = batch.info["obs_ttc"].to(device)  # (B, seq_len)
+    if has_obs_ttc_list:
+        raw_ttc = torch.stack([s_info["obs_ttc"] for s_info in batch.info]).to(device).float()  # (B, seq_len)
+        for step in range(num_targets):
+            curr_idx = num_cond + step - 1
+            targets[:, step, 0] = torch.clamp(raw_ttc[:, curr_idx], min=0.0, max=max_ttc)
+    elif has_obs_ttc_dict:
+        raw_ttc = batch.info["obs_ttc"].to(device).float()  # (B, seq_len)
         for step in range(num_targets):
             curr_idx = num_cond + step - 1
             targets[:, step, 0] = torch.clamp(raw_ttc[:, curr_idx], min=0.0, max=max_ttc)
@@ -96,27 +108,32 @@ def calculate_dataset_max_ttc(dataset: Dataset, dt: float = 0.1, fallback_max: f
     Scans the dataset to determine the maximum collision horizon observed.
     """
     print("Analyzing dataset to determine maximum TTC horizon...")
-    max_steps_observed = 0
-    total_collisions = 0
+    max_ttc_observed = 0.0
+    total_valid = 0
     
     for ep_id in range(min(dataset.num_episodes, 500)):
         try:
             ep = dataset.load_episode(ep_id)
-            crashes = torch.where(ep.end == 1)[0]
-            if len(crashes) > 0:
-                total_collisions += 1
-                crash_idx = crashes[0].item()
-                if crash_idx > max_steps_observed:
-                    max_steps_observed = crash_idx
+            if hasattr(ep, "info") and isinstance(ep.info, dict) and "obs_ttc" in ep.info:
+                ttc_vals = ep.info["obs_ttc"]
+                valid_vals = ttc_vals[(ttc_vals > 0) & (ttc_vals < 100.0)]
+                if len(valid_vals) > 0:
+                    max_ttc_observed = max(max_ttc_observed, float(valid_vals.max().item()))
+                    total_valid += 1
+            else:
+                crashes = torch.where(ep.end == 1)[0]
+                if len(crashes) > 0:
+                    total_valid += 1
+                    max_ttc_observed = max(max_ttc_observed, float(crashes[0].item() * dt))
         except Exception:
             continue
             
-    if total_collisions > 0 and max_steps_observed > 0:
-        max_ttc = float(max_steps_observed * dt)
-        print(f"Computed dataset max TTC: {max_ttc:.2f}s ({max_steps_observed} steps, {total_collisions} crash episodes inspected).")
+    if total_valid > 0 and max_ttc_observed > 0:
+        max_ttc = float(max_ttc_observed)
+        print(f"Computed dataset max TTC: {max_ttc:.2f}s ({total_valid} episodes inspected).")
         return max_ttc
     else:
-        print(f"No crashes detected in sample; using default max TTC: {fallback_max:.2f}s")
+        print(f"Using default max TTC: {fallback_max:.2f}s")
         return fallback_max
 
 

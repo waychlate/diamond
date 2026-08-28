@@ -29,6 +29,13 @@ def make_segment(episode: Episode, segment_id: SegmentId, should_pad: bool = Tru
     stop = min(len(episode), segment_id.stop)
     mask_padding = torch.cat((torch.zeros(pad_len_left), torch.ones(stop - start), torch.zeros(pad_len_right))).bool()
 
+    info = {}
+    for k, v in episode.info.items():
+        if isinstance(v, torch.Tensor) and v.ndim >= 1 and v.shape[0] == len(episode) and k != "final_observation":
+            info[k] = pad(v[start:stop])
+        else:
+            info[k] = v
+
     return Segment(
         pad(episode.obs[start:stop]),
         pad(episode.act[start:stop]),
@@ -36,7 +43,7 @@ def make_segment(episode: Episode, segment_id: SegmentId, should_pad: bool = Tru
         pad(episode.end[start:stop]),
         pad(episode.trunc[start:stop]),
         mask_padding,
-        info=episode.info,
+        info=info,
         id=SegmentId(segment_id.episode_id, start, stop),
     )
 

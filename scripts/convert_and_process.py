@@ -84,18 +84,38 @@ def convert_data(src_dir, dst_dir):
             rew = torch.from_numpy(df.reward.values[:T-1].astype(np.float32))
             
             # 3. Termination & Crash Flags
+            done_values = df.done.values[:T-1]
+            if done_values.dtype == bool:
+                done_bool = done_values
+            else:
+                done_bool = (done_values == True)
+
             if "crashed" in df:
                 crashed_values = (df.crashed.values[:T-1] == 1)
             else:
-            end = torch.from_numpy((crashed_values | done_values).astype(np.uint8))
+                crashed_values = np.zeros(T-1, dtype=bool)
+
+            end = torch.from_numpy((crashed_values | done_bool).astype(np.uint8))
             
+            # Truncation: if episode ended without termination (e.g. timeout)
+            trunc = torch.zeros_like(end)
+            if not end[-1]:
+                trunc[-1] = 1
                 
             # 4. Info block with final_observation, obs_ttc, and crashed
+            info = {
+                "final_observation": obs_all[T-1]
+            }
+            if "obs_ttc" in df:
                 raw_ttc = df.obs_ttc.values[:T-1].astype(np.float32)
                 # Clean any negative or invalid values (e.g. -1 meaning no lead vehicle -> map to 5.0s)
                 raw_ttc = np.where((raw_ttc < 0) | np.isnan(raw_ttc), 5.0, raw_ttc)
-                obs_ttc_tensor = torch.from_numpy(raw_ttc)
-            else:
+                info["obs_ttc"] = torch.from_numpy(raw_ttc)
+
+            if "crashed" in df:
+                info["crashed"] = torch.from_numpy(crashed_values.astype(np.uint8))
+
+            # 5. Create and Add Episode
             episode = Episode(obs, act, rew, end, trunc, info)
             dataset.add_episode(episode)
         print(f"Finished {split} split. {dataset}")
