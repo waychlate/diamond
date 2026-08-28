@@ -25,14 +25,23 @@ def make_segment(episode: Episode, segment_id: SegmentId, should_pad: bool = Tru
         right = F.pad(x, [0 for _ in range(2 * x.ndim - 1)] + [pad_len_right]) if pad_len_right > 0 else x
         return F.pad(right, [0 for _ in range(2 * x.ndim - 2)] + [pad_len_left, 0]) if pad_len_left > 0 else right
 
+    def pad_1d(x, pad_val=0.0):
+        left = torch.full((pad_len_left,), pad_val, dtype=x.dtype, device=x.device) if pad_len_left > 0 else None
+        right = torch.full((pad_len_right,), pad_val, dtype=x.dtype, device=x.device) if pad_len_right > 0 else None
+        parts = ([left] if left is not None else []) + [x] + ([right] if right is not None else [])
+        return torch.cat(parts) if len(parts) > 1 else x
+
     start = max(0, segment_id.start)
     stop = min(len(episode), segment_id.stop)
     mask_padding = torch.cat((torch.zeros(pad_len_left), torch.ones(stop - start), torch.zeros(pad_len_right))).bool()
 
     info = {}
     for k, v in episode.info.items():
-        if isinstance(v, torch.Tensor) and v.ndim >= 1 and v.shape[0] == len(episode) and k != "final_observation":
-            info[k] = pad(v[start:stop])
+        if isinstance(v, torch.Tensor) and v.shape[0] == len(episode) and k != "final_observation":
+            if v.ndim == 1:
+                info[k] = pad_1d(v[start:stop], pad_val=0.0)
+            else:
+                info[k] = pad(v[start:stop])
         else:
             info[k] = v
 

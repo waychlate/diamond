@@ -27,17 +27,19 @@ def compute_ttc_targets_for_batch(
     batch: Batch,
     num_cond: int,
     dt: float = 0.1,
-    max_ttc: float = 5.0,
+    max_ttc: Optional[float] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Computes ground truth TTC targets for each step in a batch after conditioning.
     Uses continuous obs_ttc from batch.info if present, otherwise falls back to step-counting.
+    If max_ttc is None or <= 0, targets are left uncapped.
     """
     b, seq_len = batch.end.shape
     num_targets = seq_len - num_cond
     device = batch.end.device
     
-    targets = torch.full((b, num_targets, 1), max_ttc, dtype=torch.float32, device=device)
+    fallback_val = max_ttc if (max_ttc is not None and max_ttc > 0) else 15.0
+    targets = torch.full((b, num_targets, 1), fallback_val, dtype=torch.float32, device=device)
     valid_masks = batch.mask_padding[:, num_cond - 1 : num_cond - 1 + num_targets].clone()
     
     has_obs_ttc_list = (
@@ -53,12 +55,18 @@ def compute_ttc_targets_for_batch(
         raw_ttc = torch.stack([s_info["obs_ttc"] for s_info in batch.info]).to(device).float()  # (B, seq_len)
         for step in range(num_targets):
             curr_idx = num_cond + step - 1
-            targets[:, step, 0] = torch.clamp(raw_ttc[:, curr_idx], min=0.0, max=max_ttc)
+            val = torch.clamp(raw_ttc[:, curr_idx], min=0.0)
+            if max_ttc is not None and max_ttc > 0:
+                val = torch.clamp(val, max=max_ttc)
+            targets[:, step, 0] = val
     elif has_obs_ttc_dict:
         raw_ttc = batch.info["obs_ttc"].to(device).float()  # (B, seq_len)
         for step in range(num_targets):
             curr_idx = num_cond + step - 1
-            targets[:, step, 0] = torch.clamp(raw_ttc[:, curr_idx], min=0.0, max=max_ttc)
+            val = torch.clamp(raw_ttc[:, curr_idx], min=0.0)
+            if max_ttc is not None and max_ttc > 0:
+                val = torch.clamp(val, max=max_ttc)
+            targets[:, step, 0] = val
     else:
         # Fallback: step-counting until crash
         for i in range(b):
@@ -71,9 +79,9 @@ def compute_ttc_targets_for_batch(
                 curr_idx = num_cond + step - 1
                 if has_crash and curr_idx <= crash_idx:
                     ttc_seconds = (crash_idx - curr_idx) * dt
-                    targets[i, step, 0] = min(ttc_seconds, max_ttc)
+                    targets[i, step, 0] = min(ttc_seconds, fallback_val)
                 else:
-                    targets[i, step, 0] = max_ttc
+                    targets[i, step, 0] = fallback_val
 
     return targets, valid_masks
 
@@ -187,7 +195,8 @@ def train_latent_ttc(args):
         max_ttc = args.max_ttc
         print(f"Using user-specified max TTC cap: {max_ttc:.2f}s")
     else:
-        max_ttc = calculate_dataset_max_ttc(train_dataset, dt=args.dt)
+        max_ttc = None
+        print("Training with UNCAPPED continuous TTC targets.")
         
     seq_len = num_cond + args.context_len
     train_sampler = BatchSampler(train_dataset, rank=0, world_size=1, batch_size=args.batch_size, seq_length=seq_len, sample_weights=None)
@@ -340,7 +349,7 @@ if __name__ == "__main__":
     parser.add_argument("--context_len", type=int, default=20, help="Number of history frames / steps observed (default: 20)")
     parser.add_argument("--no_lstm", action="store_true", help="Disable temporal LSTM (defaults to using LSTM for 20 frames)")
     parser.add_argument("--dt", type=float, default=0.1, help="Delta time per step in seconds (default: 0.1s for 10Hz)")
-    parser.add_argument("--max_ttc", type=float, default=5.0, help="Max TTC cap in seconds (default: 5.0s)")
+    parser.add_argument("--max_ttc", type=float, default=None, help="Max TTC cap in seconds (default: None for uncapped)")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate")
     parser.add_argument("--num_workers", type=int, default=0, help="DataLoader num workers (default: 0 for single-process memory safety)")
     parser.add_argument("--resume", action="store_true", default=True, help="Auto-resume from existing save_path checkpoint if found (default: True)")

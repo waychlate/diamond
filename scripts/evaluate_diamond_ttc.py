@@ -156,14 +156,20 @@ def evaluate_diamond_ttc(
             # Ground truth TTC
             if has_obs_ttc:
                 raw_val = float(batch.info[0]["obs_ttc"][curr_idx].item())
-                true_ttc = min(max(raw_val, 0.0), max_ttc)
+                true_ttc = max(raw_val, 0.0)
+                if max_ttc is not None and max_ttc > 0:
+                    true_ttc = min(true_ttc, max_ttc)
             elif hasattr(batch, "info") and isinstance(batch.info, dict) and "obs_ttc" in batch.info:
                 raw_val = float(batch.info["obs_ttc"][0, curr_idx].item())
-                true_ttc = min(max(raw_val, 0.0), max_ttc)
+                true_ttc = max(raw_val, 0.0)
+                if max_ttc is not None and max_ttc > 0:
+                    true_ttc = min(true_ttc, max_ttc)
             elif has_crash and curr_idx <= crash_idx:
-                true_ttc = min((crash_idx - curr_idx) * dt, max_ttc)
+                true_ttc = (crash_idx - curr_idx) * dt
+                if max_ttc is not None and max_ttc > 0:
+                    true_ttc = min(true_ttc, max_ttc)
             else:
-                true_ttc = max_ttc
+                true_ttc = max_ttc if (max_ttc is not None and max_ttc > 0) else 15.0
             gt_ttc_list.append(true_ttc)
             
             # TTC Prediction from Latent or Generated Frames
@@ -231,7 +237,7 @@ if __name__ == "__main__":
     parser.add_argument("--episodes", type=int, default=5, help="Number of episodes to evaluate")
     parser.add_argument("--rollout_steps", type=int, default=30, help="Number of future steps to rollout using DIAMOND")
     parser.add_argument("--dt", type=float, default=0.1, help="Time delta per step in seconds")
-    parser.add_argument("--max_ttc", type=float, default=5.0, help="Fallback max TTC in seconds")
+    parser.add_argument("--max_ttc", type=float, default=None, help="Fallback max TTC in seconds (default: None for uncapped)")
     parser.add_argument("--output_dir", type=str, default="visualizations/latent_ttc", help="Directory to save output plots")
     
     args = parser.parse_args()

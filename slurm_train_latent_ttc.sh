@@ -15,6 +15,8 @@ echo "Job Start"
 date; hostname; pwd
 echo "---"
 
+set -e
+
 mkdir -p logs
 mkdir -p checkpoints
 mkdir -p visualizations/latent_ttc_eval
@@ -32,7 +34,7 @@ source .venv/bin/activate
 #     --src_dir /blue/iruchkin/khek.do/dataset_episodes_1000 \
 #     --dst_dir /blue/iruchkin/khek.do/diamond_dataset_mcts
 
-# 1. Train Latent TTC Head directly from DIAMOND UNet bottleneck features
+# 1. Train Latent TTC Head directly from DIAMOND UNet bottleneck features (UNCAPPED)
 echo "--- Starting Latent TTC Head Training ---"
 python scripts/train_latent_ttc.py \
     --checkpoint diamond_highway_mcts.pt \
@@ -44,11 +46,10 @@ python scripts/train_latent_ttc.py \
     --hidden_dim 128 \
     --context_len 20 \
     --dt 0.1 \
-    --max_ttc 5.0 \
     --dropout 0.1 \
     --device cuda
 
-# 2. Evaluate Latent TTC Model across rollout horizons
+# 2. Evaluate Latent TTC Model across rollout horizons (UNCAPPED)
 echo "--- Running Latent TTC Evaluation ---"
 python scripts/evaluate_diamond_ttc.py \
     --checkpoint diamond_highway_mcts.pt \
@@ -58,7 +59,6 @@ python scripts/evaluate_diamond_ttc.py \
     --episodes 10 \
     --rollout_steps 30 \
     --dt 0.1 \
-    --max_ttc 5.0 \
     --output_dir visualizations/latent_ttc_eval
 
 echo "Job End"
