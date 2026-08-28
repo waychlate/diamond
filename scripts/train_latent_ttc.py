@@ -190,6 +190,15 @@ def train_latent_ttc(args):
     val_dataset = Dataset(test_path, "test_dataset")
     val_dataset.load_from_default_path()
     
+    print(f"Loaded train dataset: {train_dataset.num_episodes} episodes ({train_dataset.num_steps} steps).")
+    print(f"Loaded val dataset: {val_dataset.num_episodes} episodes ({val_dataset.num_steps} steps).")
+    
+    if train_dataset.num_episodes == 0:
+        raise RuntimeError(
+            f"No episodes found in train dataset ({train_path})! "
+            f"Please verify 'info.pt' exists in {train_path} or run scripts/convert_and_process.py first."
+        )
+    
     # Determine max TTC cap from dataset
     if args.max_ttc is not None and args.max_ttc > 0:
         max_ttc = args.max_ttc

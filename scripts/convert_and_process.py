@@ -118,6 +118,9 @@ def convert_data(src_dir, dst_dir):
             # 5. Create and Add Episode
             episode = Episode(obs, act, rew, end, trunc, info)
             dataset.add_episode(episode)
+            
+        # Finalize dataset metadata (writes info.pt)
+        dataset.save_to_default_path()
         print(f"Finished {split} split. {dataset}")
 
 if __name__ == "__main__":
