@@ -77,7 +77,8 @@ def evaluate_diamond_ttc(
             ttc_predictor = LatentTTCHead(in_channels=in_channels, hidden_dim=hidden_dim, use_temporal_lstm=use_lstm).to(device).eval()
             sd = ckpt["model_state_dict"] if isinstance(ckpt, dict) and "model_state_dict" in ckpt else ckpt
             ttc_predictor.load_state_dict(sd)
-            print(f"Latent TTC Head weights loaded successfully (use_lstm={use_lstm}, max_ttc={max_ttc:.2f}s).")
+            max_ttc_str = f"{max_ttc:.2f}s" if (max_ttc is not None and max_ttc > 0) else "uncapped"
+            print(f"Latent TTC Head weights loaded successfully (use_lstm={use_lstm}, max_ttc={max_ttc_str}).")
         else:
             ttc_predictor = LatentTTCHead(in_channels=in_channels, hidden_dim=hidden_dim, use_temporal_lstm=use_lstm).to(device).eval()
             print(f"Warning: {ttc_model_path} not found. Proceeding with initial weights for evaluation structure.")
@@ -147,7 +148,11 @@ def evaluate_diamond_ttc(
             and isinstance(batch.info[0], dict)
             and "obs_ttc" in batch.info[0]
         )
-        
+        if ep_idx == 0:
+            print(f"Ground truth obs_ttc detected in batch: {has_obs_ttc}")
+            if has_obs_ttc:
+                print(f"First 5 ground truth TTC values: {batch.info[0]['obs_ttc'][:5].tolist()}")
+
         print(f"\nEpisode {ep_idx + 1}/{num_episodes}: Evaluating {rollout_steps}-step horizon...")
         for step in range(rollout_steps):
             curr_idx = num_cond + step - 1

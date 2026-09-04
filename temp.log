@@ -1,0 +1,36 @@
+--- Starting Latent TTC Head Training ---
+Training Latent TTC Predictor on device: cuda
+Instantiating DIAMOND Agent...
+Loading DIAMOND checkpoint from diamond_highway_mcts.pt...
+DIAMOND Denoiser weights loaded successfully.
+DIAMOND conditioning history steps: 4
+Loading train dataset from /blue/iruchkin/khek.do/diamond_dataset_1000/train...
+Loading val dataset from /blue/iruchkin/khek.do/diamond_dataset_1000/test...
+Loaded train dataset: 1800 episodes (1800000 steps).
+Loaded val dataset: 200 episodes (200000 steps).
+Training with UNCAPPED continuous TTC targets.
+
+Starting training from epoch 1 to 50 (100 steps/epoch) with context_len=20 frames...
+Epoch 001 | Train Loss: 7.4652 | Val MAE: 7.2037s | Val RMSE: 8.3069s
+--> Saved new best model with Val MAE: 7.2037s to checkpoints/best_latent_ttc.pt
+Epoch 002 | Train Loss: 5.9991 | Val MAE: 5.8508s | Val RMSE: 6.4639s
+--> Saved new best model with Val MAE: 5.8508s to checkpoints/best_latent_ttc.pt
+Epoch 003 | Train Loss: 4.8668 | Val MAE: 4.6242s | Val RMSE: 5.3187s
+--> Saved new best model with Val MAE: 4.6242s to checkpoints/best_latent_ttc.pt
+Epoch 004 | Train Loss: 3.3590 | Val MAE: 3.2200s | Val RMSE: 4.2211s
+--> Saved new best model with Val MAE: 3.2200s to checkpoints/best_latent_ttc.pt
+Epoch 005 | Train Loss: 2.5020 | Val MAE: 2.7958s | Val RMSE: 4.4027s
+--> Saved new best model with Val MAE: 2.7958s to checkpoints/best_latent_ttc.pt
+Epoch 006 | Train Loss: 2.2647 | Val MAE: 2.9930s | Val RMSE: 5.1231s
+Epoch 007 | Train Loss: 2.0920 | Val MAE: 2.5088s | Val RMSE: 4.6566s
+--> Saved new best model with Val MAE: 2.5088s to checkpoints/best_latent_ttc.pt
+Epoch 008 | Train Loss: 2.1012 | Val MAE: 1.9531s | Val RMSE: 3.8597s
+--> Saved new best model with Val MAE: 1.9531s to checkpoints/best_latent_ttc.pt
+Epoch 009 | Train Loss: 1.7819 | Val MAE: 1.9666s | Val RMSE: 3.6574s
+Epoch 010 | Train Loss: 1.8066 | Val MAE: 1.7441s | Val RMSE: 3.3958s
+--> Saved new best model with Val MAE: 1.7441s to checkpoints/best_latent_ttc.pt
+Epoch 011 | Train Loss: 1.6160 | Val MAE: 1.7160s | Val RMSE: 3.4477s
+--> Saved new best model with Val MAE: 1.7160s to checkpoints/best_latent_ttc.pt
+Epoch 012 | Train Loss: 1.7174 | Val MAE: 1.8081s | Val RMSE: 3.6801s
+Epoch 013 | Train Loss: 1.5167 | Val MAE: 1.5439s | Val RMSE: 2.9765s
+--> Saved new best model with Val MAE: 1.5439s to checkpoints/best_latent_ttc.pt
