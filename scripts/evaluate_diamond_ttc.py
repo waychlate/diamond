@@ -1,5 +1,7 @@
 import os
 import sys
+import csv
+import json
 import argparse
 from pathlib import Path
 import torch
@@ -117,6 +119,9 @@ def evaluate_diamond_ttc(
     
     step_maes = [[] for _ in range(rollout_steps)]
     step_mses = [[] for _ in range(rollout_steps)]
+    all_records = []
+    all_gt = []
+    all_pred = []
     
     for ep_idx in range(num_episodes):
         try:
@@ -192,6 +197,14 @@ def evaluate_diamond_ttc(
             error_mse = (pred_val - true_ttc) ** 2
             step_maes[step].append(error_mae)
             step_mses[step].append(error_mse)
+            all_records.append({
+                "episode": ep_idx + 1,
+                "lookahead_step": step + 1,
+                "ground_truth_ttc": round(true_ttc, 4),
+                "predicted_ttc": round(pred_val, 4),
+                "abs_error": round(error_mae, 4),
+                "squared_error": round(error_mse, 4),
+            })
             
             # Rollout step in world model
             next_obs, _ = sampler.sample(history_obs, history_act)
@@ -200,6 +213,9 @@ def evaluate_diamond_ttc(
             history_obs = torch.cat([history_obs[:, 1:], next_obs.unsqueeze(1)], dim=1)
             history_act = torch.cat([history_act[:, 1:], curr_act], dim=1)
             
+        all_gt.append(gt_ttc_list)
+        all_pred.append(predicted_ttc_list)
+
         # Plot episode TTC trajectory
         plt.figure(figsize=(9, 4))
         plt.plot(range(1, rollout_steps + 1), gt_ttc_list, 'g--', label="Ground Truth TTC", linewidth=2)
@@ -215,6 +231,73 @@ def evaluate_diamond_ttc(
         plt.close()
         print(f"Saved episode trajectory plot to {ep_plot_path}")
 
+    # 1. Export Raw Step-by-Step Predictions CSV
+    csv_path = os.path.join(output_dir, "eval_ttc_predictions.csv")
+    with open(csv_path, mode="w", newline="") as f:
+        fieldnames = ["episode", "lookahead_step", "ground_truth_ttc", "predicted_ttc", "abs_error", "squared_error"]
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(all_records)
+    print(f"\nSaved step-by-step predictions CSV to {csv_path}")
+
+    # 2. Export Lookahead Horizon Metrics CSV
+    horizon_csv_path = os.path.join(output_dir, "eval_horizon_metrics.csv")
+    with open(horizon_csv_path, mode="w", newline="") as f:
+        fieldnames = ["lookahead_step", "mean_mae", "mean_rmse", "std_mae"]
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for step in range(rollout_steps):
+            errs = step_maes[step]
+            sq_errs = step_mses[step]
+            m_mae = float(np.mean(errs)) if len(errs) > 0 else 0.0
+            m_rmse = float(np.sqrt(np.mean(sq_errs))) if len(sq_errs) > 0 else 0.0
+            s_mae = float(np.std(errs)) if len(errs) > 0 else 0.0
+            writer.writerow({
+                "lookahead_step": step + 1,
+                "mean_mae": round(m_mae, 4),
+                "mean_rmse": round(m_rmse, 4),
+                "std_mae": round(s_mae, 4)
+            })
+    print(f"Saved lookahead horizon metrics CSV to {horizon_csv_path}")
+
+    # 3. Export Compressed NumPy NPZ Dataset
+    npz_path = os.path.join(output_dir, "eval_data.npz")
+    np.savez_compressed(
+        npz_path,
+        ground_truth=np.array(all_gt),
+        predictions=np.array(all_pred),
+        step_maes=np.array(step_maes),
+        step_mses=np.array(step_mses)
+    )
+    print(f"Saved compressed NumPy arrays to {npz_path}")
+
+    # 4. Compute Overall Summary Statistics and Save JSON
+    if len(all_records) > 0:
+        overall_mae = float(np.mean([r["abs_error"] for r in all_records]))
+        overall_rmse = float(np.sqrt(np.mean([r["squared_error"] for r in all_records])))
+        gt_flat = np.array([r["ground_truth_ttc"] for r in all_records])
+        pred_flat = np.array([r["predicted_ttc"] for r in all_records])
+        corr = float(np.corrcoef(gt_flat, pred_flat)[0, 1]) if len(gt_flat) > 1 and np.std(gt_flat) > 0 and np.std(pred_flat) > 0 else 0.0
+
+        summary = {
+            "overall_mae_seconds": round(overall_mae, 4),
+            "overall_rmse_seconds": round(overall_rmse, 4),
+            "pearson_correlation_r": round(corr, 4),
+            "num_episodes": len(all_gt),
+            "rollout_steps": rollout_steps,
+            "mode": mode
+        }
+        json_path = os.path.join(output_dir, "eval_summary.json")
+        with open(json_path, "w") as f:
+            json.dump(summary, f, indent=4)
+        print(f"Saved evaluation summary JSON to {json_path}")
+        print(f"\n=================== EVALUATION SUMMARY ===================")
+        print(f"Overall MAE:           {overall_mae:.4f}s")
+        print(f"Overall RMSE:          {overall_rmse:.4f}s")
+        print(f"Pearson Correlation R: {corr:.4f}")
+        print(f"Total Evaluated Points:{len(all_records)}")
+        print(f"==========================================================\n")
+
     # Plot Horizon Error Curve
     if any(len(errs) > 0 for errs in step_maes):
         avg_maes = [np.mean(errs) if len(errs) > 0 else 0.0 for errs in step_maes]
@@ -228,7 +311,7 @@ def evaluate_diamond_ttc(
         horizon_plot_path = os.path.join(output_dir, "latent_ttc_horizon_error.png")
         plt.savefig(horizon_plot_path)
         plt.close()
-        print(f"\nSaved Horizon Error Plot to {horizon_plot_path}")
+        print(f"Saved Horizon Error Plot to {horizon_plot_path}")
 
     print("\nDIAMOND Latent TTC Evaluation Complete!")
 

@@ -38,7 +38,6 @@ python scripts/evaluate_diamond_ttc.py \
     --mode latent \
     --episodes 10 \
     --rollout_steps 30 \
-    --dt 0.1 \
     --output_dir visualizations/latent_ttc_eval
 
 echo "Job End"
