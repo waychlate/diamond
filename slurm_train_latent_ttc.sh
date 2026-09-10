@@ -57,6 +57,7 @@ python scripts/evaluate_diamond_ttc.py \
     --dataset_path /blue/iruchkin/khek.do/diamond_dataset_1000 \
     --mode latent \
     --episodes 10 \
+    --context_len 20 \
     --rollout_steps 30 \
     --dt 0.1 \
     --output_dir visualizations/latent_ttc_eval

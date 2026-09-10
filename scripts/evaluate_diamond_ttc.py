@@ -33,10 +33,13 @@ def evaluate_diamond_ttc(
     dataset_path: str,
     mode: str = "latent",
     num_episodes: int = 5,
+    context_len: int = 20,
     rollout_steps: int = 30,
     dt: float = 0.1,
     max_ttc: float = 5.0,
     output_dir: str = "visualizations"
+    max_ttc: float = None,
+    output_dir: str = "visualizations/latent_ttc_eval",
 ):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Evaluating DIAMOND TTC in [{mode.upper()}] mode on device: {device}")
@@ -108,6 +111,7 @@ def evaluate_diamond_ttc(
     test_dataset.load_from_default_path()
     
     seq_len = num_cond + rollout_steps
+    seq_len = (num_cond + context_len - 1) + rollout_steps
     batch_sampler = BatchSampler(test_dataset, rank=0, world_size=1, batch_size=1, seq_length=seq_len, sample_weights=None)
     data_loader = DataLoader(test_dataset, batch_sampler=batch_sampler, collate_fn=collate_segments_to_batch)
     
@@ -115,6 +119,7 @@ def evaluate_diamond_ttc(
     
     # 4. Rollout & Predict
     print(f"\nStarting DIAMOND Rollout & TTC Evaluation over {num_episodes} episodes...")
+    print(f"\nStarting DIAMOND Rollout & TTC Evaluation over {num_episodes} episodes with {context_len}-frame context...")
     data_iterator = iter(data_loader)
     
     step_maes = [[] for _ in range(rollout_steps)]
@@ -162,6 +167,15 @@ def evaluate_diamond_ttc(
         for step in range(rollout_steps):
             curr_idx = num_cond + step - 1
             curr_act = act[:, curr_idx : curr_idx + 1]
+        # --- Phase 1: Ingest 20 real history frames to warm up the LSTM ---
+        hx_cx = None
+        context_gt_ttc = []
+        context_pred_ttc = []
+        
+        for t in range(context_len):
+            window_obs = obs[:, t : t + num_cond]
+            window_act = act[:, t : t + num_cond]
+            curr_idx = num_cond + t - 1
             
             # Ground truth TTC
             if has_obs_ttc:
@@ -171,18 +185,58 @@ def evaluate_diamond_ttc(
                     true_ttc = min(true_ttc, max_ttc)
             elif hasattr(batch, "info") and isinstance(batch.info, dict) and "obs_ttc" in batch.info:
                 raw_val = float(batch.info["obs_ttc"][0, curr_idx].item())
-                true_ttc = max(raw_val, 0.0)
-                if max_ttc is not None and max_ttc > 0:
-                    true_ttc = min(true_ttc, max_ttc)
             elif has_crash and curr_idx <= crash_idx:
                 true_ttc = (crash_idx - curr_idx) * dt
                 if max_ttc is not None and max_ttc > 0:
                     true_ttc = min(true_ttc, max_ttc)
             else:
                 true_ttc = max_ttc if (max_ttc is not None and max_ttc > 0) else 15.0
+            context_gt_ttc.append(true_ttc)
+            
+            if mode == "latent":
+                z = agent.denoiser.extract_latent(window_obs, window_act)
+                pred_ttc, hx_cx = ttc_predictor(z.unsqueeze(1), hx_cx)
+                context_pred_ttc.append(pred_ttc.squeeze().item())
+            else:
+                context_pred_ttc.append(0.0)
+
+        curr_gt = context_gt_ttc[-1]
+        curr_pred = context_pred_ttc[-1]
+        curr_error = abs(curr_pred - curr_gt)
+        print(f"\nEpisode {ep_idx + 1}/{num_episodes}: Primed with {context_len} real frames.")
+        print(f"  -> Current Time (T=0) TTC: GT = {curr_gt:.2f}s | Pred = {curr_pred:.2f}s (Error: {curr_error:.2f}s)")
+        print(f"  -> Rolling out {rollout_steps} steps into future dream from primed state...")
+
+        # --- Phase 2: Roll out into the future (+1 to +rollout_steps) from primed state ---
+        history_obs = obs[:, context_len - 1 : context_len - 1 + num_cond].clone()
+        history_act = act[:, context_len - 1 : context_len - 1 + num_cond].clone()
+        
+        future_gt_ttc = []
+        future_pred_ttc = []
+        
+        for step in range(rollout_steps):
+            future_idx = (num_cond + context_len - 1) + step
+            curr_act = act[:, future_idx : future_idx + 1] if future_idx < act.shape[1] else act[:, -1:]
+            
+            # Ground truth future TTC
+            if has_obs_ttc and future_idx < len(batch.info[0]["obs_ttc"]):
+                raw_val = float(batch.info[0]["obs_ttc"][future_idx].item())
+                true_ttc = max(raw_val, 0.0)
+                if max_ttc is not None and max_ttc > 0:
+                    true_ttc = min(true_ttc, max_ttc)
+            elif has_crash and curr_idx <= crash_idx:
+                true_ttc = (crash_idx - curr_idx) * dt
+            elif has_crash and future_idx <= crash_idx:
+                true_ttc = (crash_idx - future_idx) * dt
+                if max_ttc is not None and max_ttc > 0:
+                    true_ttc = min(true_ttc, max_ttc)
+            else:
+                true_ttc = max_ttc if (max_ttc is not None and max_ttc > 0) else 15.0
             gt_ttc_list.append(true_ttc)
+            future_gt_ttc.append(true_ttc)
             
             # TTC Prediction from Latent or Generated Frames
+            # Predict TTC from latent using primed LSTM memory
             if mode == "latent":
                 z = agent.denoiser.extract_latent(history_obs, history_act)
                 pred_ttc, hx_cx = ttc_predictor(z.unsqueeze(1), hx_cx)
@@ -192,6 +246,7 @@ def evaluate_diamond_ttc(
                 pred_val = 0.0
                 
             predicted_ttc_list.append(pred_val)
+            future_pred_ttc.append(pred_val)
             
             error_mae = abs(pred_val - true_ttc)
             error_mse = (pred_val - true_ttc) ** 2
@@ -215,6 +270,8 @@ def evaluate_diamond_ttc(
             
         all_gt.append(gt_ttc_list)
         all_pred.append(predicted_ttc_list)
+        all_gt.append(future_gt_ttc)
+        all_pred.append(future_pred_ttc)
 
         # Plot episode TTC trajectory
         plt.figure(figsize=(9, 4))
@@ -222,8 +279,22 @@ def evaluate_diamond_ttc(
         plt.plot(range(1, rollout_steps + 1), predicted_ttc_list, 'b-', label=f"Predicted TTC ({mode.capitalize()})", linewidth=2)
         plt.title(f"Episode {ep_idx + 1}: TTC Prediction Trajectory")
         plt.xlabel("Lookahead Step")
+        # Plot full episode trajectory: Past Context + Future Dream
+        past_x = list(range(-context_len + 1, 1))
+        future_x = list(range(1, rollout_steps + 1))
+
+        plt.figure(figsize=(10, 4.5))
+        plt.plot(past_x, context_gt_ttc, color="gray", linestyle="--", label="Ground Truth (Past Context)", linewidth=1.8)
+        plt.plot(past_x, context_pred_ttc, color="cyan", linestyle="-", label="TTC Tracking (Past Context)", linewidth=2.0)
+        plt.plot(future_x, future_gt_ttc, color="green", linestyle="--", label="Ground Truth (Future)", linewidth=2.0)
+        plt.plot(future_x, future_pred_ttc, color="blue", linestyle="-", label=f"Predicted TTC ({mode.capitalize()} Dream)", linewidth=2.2)
+        plt.axvline(x=0, color="red", linestyle=":", linewidth=2, label="Current Moment (T=0, Dream Begins)")
+        
+        plt.title(f"Episode {ep_idx + 1}: TTC Tracking with {context_len}-Frame Context & {rollout_steps}-Step Future Rollout")
+        plt.xlabel("Timeline Steps (Negative = Past Context, Positive = Future Lookahead)")
         plt.ylabel("TTC (seconds)")
         plt.legend()
+        plt.legend(loc="upper right")
         plt.grid(True, linestyle="--", alpha=0.5)
         plt.tight_layout()
         ep_plot_path = os.path.join(output_dir, f"episode_{ep_idx + 1}_ttc_trajectory.png")
@@ -323,10 +394,12 @@ if __name__ == "__main__":
     parser.add_argument("--dataset_path", type=str, default="dataset_mcts", help="Path to dataset directory")
     parser.add_argument("--mode", type=str, default="latent", choices=["latent", "pixel"], help="Evaluation mode (latent or pixel)")
     parser.add_argument("--episodes", type=int, default=5, help="Number of episodes to evaluate")
+    parser.add_argument("--context_len", type=int, default=20, help="Number of past context frames to prime the LSTM (default: 20)")
     parser.add_argument("--rollout_steps", type=int, default=30, help="Number of future steps to rollout using DIAMOND")
     parser.add_argument("--dt", type=float, default=0.1, help="Time delta per step in seconds")
     parser.add_argument("--max_ttc", type=float, default=None, help="Fallback max TTC in seconds (default: None for uncapped)")
     parser.add_argument("--output_dir", type=str, default="visualizations/latent_ttc", help="Directory to save output plots")
+    parser.add_argument("--output_dir", type=str, default="visualizations/latent_ttc_eval", help="Directory to save output plots")
     
     args = parser.parse_args()
     evaluate_diamond_ttc(
@@ -335,6 +408,7 @@ if __name__ == "__main__":
         dataset_path=args.dataset_path,
         mode=args.mode,
         num_episodes=args.episodes,
+        context_len=args.context_len,
         rollout_steps=args.rollout_steps,
         dt=args.dt,
         max_ttc=args.max_ttc,
