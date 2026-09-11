@@ -1,7 +1,7 @@
-from __future__ import annotations
-from typing import Any, Dict, Optional, Tuple
-
-import ale_py
+try:
+    import ale_py
+except ImportError:
+    ale_py = None
 import gymnasium
 from gymnasium.vector import AsyncVectorEnv
 import numpy as np

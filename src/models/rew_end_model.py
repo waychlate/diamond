@@ -5,7 +5,16 @@ import torch
 from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
-from torcheval.metrics.functional import multiclass_confusion_matrix
+
+try:
+    from torcheval.metrics.functional import multiclass_confusion_matrix
+except ImportError:
+    def multiclass_confusion_matrix(input: Tensor, target: Tensor, num_classes: int) -> Tensor:
+        preds = input.argmax(dim=-1) if input.ndim > target.ndim else input
+        indices = num_classes * target + preds
+        return torch.bincount(indices, minlength=num_classes**2).reshape(num_classes, num_classes)
+
+
 
 from .blocks import Conv3x3, Downsample, ResBlocks
 from data import Batch

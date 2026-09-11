@@ -16,8 +16,10 @@ from torch import Tensor
 from torch.optim.lr_scheduler import LambdaLR
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.optim import AdamW
-import wandb
+try:
+    import wandb
+except ImportError:
+    wandb = None
 
 
 ATARI_100K_GAMES = [

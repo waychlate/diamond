@@ -140,4 +140,8 @@ class Dataset(StateDictMixin, torch.utils.data.Dataset):
 
     def load_from_default_path(self) -> None:
         if self._default_path.is_file():
-            self.load_state_dict(torch.load(self._default_path))
+            try:
+                sd = torch.load(self._default_path, weights_only=False)
+            except TypeError:
+                sd = torch.load(self._default_path)
+            self.load_state_dict(sd)
