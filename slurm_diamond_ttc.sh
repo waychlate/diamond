@@ -23,14 +23,15 @@ cd /home/khek.do/diamond
 
 source .venv/bin/activate
 
-# Execute DIAMOND visual rollout + TTC Trajectory evaluation
+# Execute DIAMOND visual rollout + TTC Lookahead evaluation with 20-frame context
 python scripts/evaluate_diamond_ttc.py \
     --checkpoint diamond_highway_mcts.pt \
     --ttc-model /home/khek.do/diamond/best_model.pth \
     --dataset_path /blue/iruchkin/khek.do/dataset_episodes_1000 \
     --episodes 10 \
-    --rollout_steps 30 \
-    --output_dir visualizations/diamond_ttc_rollouts
+    --context_frames 20 \
+    --lookahead_steps 30 \
+    --output_dir visualizations/ttc_lookahead_eval
 
 echo "Job End"
 date
