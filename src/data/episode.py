@@ -35,17 +35,40 @@ class Episode:
 
     @classmethod
     def load(cls, path: Path, map_location: Optional[torch.device] = None) -> Episode:
-        return cls(
-            **{
-                k: v.div(255).mul(2).sub(1) if k == "obs" else v
-                for k, v in torch.load(Path(path), map_location=map_location).items()
-            }
-        )
+        raw = torch.load(Path(path), map_location=map_location)
+        d = {}
+        for k, v in raw.items():
+            if k == "obs" and isinstance(v, torch.Tensor) and v.dtype == torch.uint8:
+                d[k] = v.float().div(255.0).mul(2.0).sub(1.0)
+            elif k == "info" and isinstance(v, dict):
+                info_d = {}
+                for ik, iv in v.items():
+                    if ik == "final_observation" and isinstance(iv, torch.Tensor) and iv.dtype == torch.uint8:
+                        info_d[ik] = iv.float().div(255.0).mul(2.0).sub(1.0)
+                    else:
+                        info_d[ik] = iv
+                d[k] = info_d
+            else:
+                d[k] = v
+        return cls(**d)
 
     def save(self, path: Path) -> None:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        d = {k: v.add(1).div(2).mul(255).byte() if k == "obs" else v for k, v in self.__dict__.items()}
+        d = {}
+        for k, v in self.__dict__.items():
+            if k == "obs" and isinstance(v, torch.Tensor) and v.dtype != torch.uint8:
+                d[k] = v.add(1.0).div(2.0).mul(255.0).byte()
+            elif k == "info" and isinstance(v, dict):
+                info_d = {}
+                for ik, iv in v.items():
+                    if ik == "final_observation" and isinstance(iv, torch.Tensor) and iv.dtype != torch.uint8:
+                        info_d[ik] = iv.add(1.0).div(2.0).mul(255.0).byte()
+                    else:
+                        info_d[ik] = iv
+                d[k] = info_d
+            else:
+                d[k] = v
         torch.save(d, path.with_suffix(".tmp"))
         path.with_suffix(".tmp").rename(path)
 

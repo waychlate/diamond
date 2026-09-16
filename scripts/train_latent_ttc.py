@@ -294,6 +294,11 @@ def train_latent_ttc(args):
         val_mse_total = 0.0
         val_samples = 0
         
+        # 20-Frame Context specific metrics (evaluated strictly on the final primed step of the 20-frame window)
+        context_val_mae_total = 0.0
+        context_val_mse_total = 0.0
+        context_val_samples = 0
+        
         with torch.no_grad():
             for _ in range(val_steps):
                 batch = next(val_iter)
@@ -307,29 +312,45 @@ def train_latent_ttc(args):
                 latents_seq = extract_latents_for_sequence(agent, obs, act, num_cond, args.context_len)
                 pred_ttc, _ = ttc_head(latents_seq)
                 
+                # 1. Full Sequence Metrics (all steps 1..20)
                 valid_preds = pred_ttc[masks]
                 valid_targs = targets[masks]
-                
                 if len(valid_preds) > 0:
-                    mae = F.l1_loss(valid_preds, valid_targs, reduction="sum").item()
-                    mse = F.mse_loss(valid_preds, valid_targs, reduction="sum").item()
-                    val_mae_total += mae
-                    val_mse_total += mse
+                    val_mae_total += F.l1_loss(valid_preds, valid_targs, reduction="sum").item()
+                    val_mse_total += F.mse_loss(valid_preds, valid_targs, reduction="sum").item()
                     val_samples += len(valid_preds)
+                
+                # 2. Primed Context Metrics (evaluated specifically at step 20 after full context history)
+                last_mask = masks[:, -1]
+                if last_mask.any():
+                    last_preds = pred_ttc[:, -1, 0][last_mask]
+                    last_targs = targets[:, -1, 0][last_mask]
+                    context_val_mae_total += F.l1_loss(last_preds, last_targs, reduction="sum").item()
+                    context_val_mse_total += F.mse_loss(last_preds, last_targs, reduction="sum").item()
+                    context_val_samples += last_mask.sum().item()
                     
         avg_val_mae = val_mae_total / max(1, val_samples)
         avg_val_mse = val_mse_total / max(1, val_samples)
         
-        print(f"Epoch {epoch:03d} | Train Loss: {avg_train_loss:.4f} | Val MAE: {avg_val_mae:.4f}s | Val RMSE: {avg_val_mse**0.5:.4f}s")
+        avg_context_val_mae = context_val_mae_total / max(1, context_val_samples)
+        avg_context_val_mse = context_val_mse_total / max(1, context_val_samples)
+        avg_context_val_rmse = avg_context_val_mse ** 0.5
         
-        # Save Best Checkpoint
-        if avg_val_mae < best_val_mae:
-            best_val_mae = avg_val_mae
+        print(f"Epoch {epoch:03d} | Train Loss: {avg_train_loss:.4f} | "
+              f"20-Frame Context Val: MAE={avg_context_val_mae:.4f}s, MSE={avg_context_val_mse:.4f}s², RMSE={avg_context_val_rmse:.4f}s | "
+              f"(Seq Avg MAE: {avg_val_mae:.4f}s)")
+        
+        # Save Best Checkpoint based on 20-frame primed context performance
+        if avg_context_val_mae < best_val_mae:
+            best_val_mae = avg_context_val_mae
             checkpoint_payload = {
                 "epoch": epoch,
                 "model_state_dict": ttc_head.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
-                "val_mae": avg_val_mae,
+                "val_mae": avg_context_val_mae,
+                "val_mse": avg_context_val_mse,
+                "seq_val_mae": avg_val_mae,
+                "seq_val_mse": avg_val_mse,
                 "max_ttc": max_ttc,
                 "config": {
                     "in_channels": in_channels,
@@ -340,9 +361,9 @@ def train_latent_ttc(args):
                 }
             }
             torch.save(checkpoint_payload, args.save_path)
-            print(f"--> Saved new best model with Val MAE: {best_val_mae:.4f}s to {args.save_path}")
+            print(f"--> Saved new best model (20-Frame Context Val MAE: {best_val_mae:.4f}s, MSE: {avg_context_val_mse:.4f}s²) to {args.save_path}")
 
-    print(f"\nTraining Complete. Best Validation MAE: {best_val_mae:.4f}s. Saved to: {args.save_path}")
+    print(f"\nTraining Complete. Best 20-Frame Context Validation MAE: {best_val_mae:.4f}s. Saved to: {args.save_path}")
 
 
 if __name__ == "__main__":
