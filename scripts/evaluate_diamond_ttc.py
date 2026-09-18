@@ -357,7 +357,7 @@ def evaluate_diamond_ttc(
             "pixel_mae",
             "pixel_psnr"
         ]
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(all_records)
     print(f"\nSaved step-by-step predictions CSV to {csv_path}")
@@ -378,7 +378,7 @@ def evaluate_diamond_ttc(
             "sem_pixel_mse",
             "mean_pixel_psnr"
         ]
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         for step in range(rollout_steps):
             errs = step_maes[step]
@@ -430,9 +430,10 @@ def evaluate_diamond_ttc(
             "abs_error",
             "squared_error",
             "pixel_mse",
+            "pixel_mae",
             "pixel_psnr"
         ]
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         for rank, r in enumerate(top_50_lowest_records, 1):
             row = {"rank": rank, **r}
