@@ -224,15 +224,6 @@ class UNet(nn.Module):
         self.upsamples = nn.ModuleList(upsamples)
 
     def forward(self, x: Tensor, cond: Tensor) -> Tensor:
-        h, w = x.shape[-2], x.shape[-1]
-        n = self._num_down
-        factor = 2 ** n
-        pad_h = (math.ceil(h / factor) * factor) - h if isinstance(h, int) else 0
-        pad_w = (math.ceil(w / factor) * factor) - w if isinstance(w, int) else 0
-
-        if pad_h > 0 or pad_w > 0:
-            x = F.pad(x, (0, int(pad_w), 0, int(pad_h)))
-
         d_outputs = []
         for block, down in zip(self.d_blocks, self.downsamples):
             x_down = down(x)
@@ -247,6 +238,4 @@ class UNet(nn.Module):
             x, block_outputs = block(x_up, cond, skip[::-1])
             u_outputs.append((x_up, *block_outputs))
 
-        if pad_h > 0 or pad_w > 0:
-            x = x[..., :h, :w]
         return x, d_outputs, u_outputs
