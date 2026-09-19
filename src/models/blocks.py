@@ -60,15 +60,17 @@ class SelfAttention2d(nn.Module):
         nn.init.zeros_(self.out_proj.bias)
 
     def forward(self, x: Tensor) -> Tensor:
-        n, c, h, w = x.shape
-        x = self.norm(x)
-        qkv = self.qkv_proj(x)
-        qkv = qkv.view(n, self.n_head * 3, c // self.n_head, h * w).transpose(2, 3).contiguous()
-        q, k, v = [x for x in qkv.chunk(3, dim=1)]
-        att = (q @ k.transpose(-2, -1)) / math.sqrt(k.size(-1))
+        _, c, h, w = x.shape
+        norm_x = self.norm(x)
+        qkv = self.qkv_proj(norm_x)
+        head_dim = c // self.n_head
+        qkv = qkv.view(-1, self.n_head * 3, head_dim, h * w).transpose(2, 3).contiguous()
+        q, k, v = qkv.chunk(3, dim=1)
+        scale = 1.0 / math.sqrt(head_dim)
+        att = (q @ k.transpose(-2, -1)) * scale
         att = F.softmax(att, dim=-1)
         y = att @ v
-        y = y.transpose(2, 3).reshape(n, c, h, w)
+        y = y.transpose(2, 3).reshape(-1, c, h, w)
         return x + self.out_proj(y)
 
 
@@ -222,11 +224,14 @@ class UNet(nn.Module):
         self.upsamples = nn.ModuleList(upsamples)
 
     def forward(self, x: Tensor, cond: Tensor) -> Tensor:
-        *_, h, w = x.size()
+        h, w = x.shape[-2], x.shape[-1]
         n = self._num_down
-        padding_h = math.ceil(h / 2 ** n) * 2 ** n - h
-        padding_w = math.ceil(w / 2 ** n) * 2 ** n - w
-        x = F.pad(x, (0, padding_w, 0, padding_h))
+        factor = 2 ** n
+        pad_h = (math.ceil(h / factor) * factor) - h if isinstance(h, int) else 0
+        pad_w = (math.ceil(w / factor) * factor) - w if isinstance(w, int) else 0
+
+        if pad_h > 0 or pad_w > 0:
+            x = F.pad(x, (0, int(pad_w), 0, int(pad_h)))
 
         d_outputs = []
         for block, down in zip(self.d_blocks, self.downsamples):
@@ -242,5 +247,6 @@ class UNet(nn.Module):
             x, block_outputs = block(x_up, cond, skip[::-1])
             u_outputs.append((x_up, *block_outputs))
 
-        x = x[..., :h, :w]
+        if pad_h > 0 or pad_w > 0:
+            x = x[..., :h, :w]
         return x, d_outputs, u_outputs

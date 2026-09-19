@@ -28,6 +28,13 @@ else
     TRTEXEC=trtexec
 fi
 
+if [ ! -f "$ONNX_FILE" ]; then
+    echo "Error: ONNX file '$ONNX_FILE' does not exist in the current directory!"
+    echo "Please first export the ONNX model by running:"
+    echo "  python scripts/export_onnx.py --checkpoint <path_to_checkpoint.pt> --output $ONNX_FILE"
+    exit 1
+fi
+
 # Highway dimensions: Obs: 12x48x320, Noisy: 3x48x320, Act: 4
 # Min Batch: 1, Opt Batch: 16 (or 32), Max Batch: 64
 
@@ -36,8 +43,9 @@ FLAGS="$FLAGS --minShapes=noisy_next_obs:1x3x48x320,c_noise:1,obs:1x12x48x320,ac
 FLAGS="$FLAGS --optShapes=noisy_next_obs:16x3x48x320,c_noise:16,obs:16x12x48x320,act:16x4"
 FLAGS="$FLAGS --maxShapes=noisy_next_obs:64x3x48x320,c_noise:64,obs:64x12x48x320,act:64x4"
 
-# Set workspace memory (4GB for tactics selection)
-FLAGS="$FLAGS --workspace=4096"
+# Set workspace memory (1024 MB safe for 4GB Jetson Nano / TX1 & Xavier/Orin)
+WORKSPACE="${WORKSPACE:-1024}"
+FLAGS="$FLAGS --workspace=$WORKSPACE"
 
 # Check if --builderOptimizationLevel is supported (TRT 8.6+)
 if $TRTEXEC --help 2>&1 | grep -q "builderOptimizationLevel"; then
