@@ -35,14 +35,7 @@ FLAGS="--onnx=$ONNX_FILE --saveEngine=$ENGINE_FILE"
 FLAGS="$FLAGS --minShapes=noisy_next_obs:1x3x48x320,c_noise:1,obs:1x12x48x320,act:1x4"
 FLAGS="$FLAGS --optShapes=noisy_next_obs:16x3x48x320,c_noise:16,obs:16x12x48x320,act:16x4"
 FLAGS="$FLAGS --maxShapes=noisy_next_obs:64x3x48x320,c_noise:64,obs:64x12x48x320,act:64x4"
-
-# Set workspace memory (4GB for tactics selection)
-FLAGS="$FLAGS --workspace=4096"
-
-# Check if --builderOptimizationLevel is supported (TRT 8.6+)
-if $TRTEXEC --help 2>&1 | grep -q "builderOptimizationLevel"; then
-    FLAGS="$FLAGS --builderOptimizationLevel=5"
-fi
+FLAGS="$FLAGS --builderOptimizationLevel=5"
 
 if [ "$PRECISION" == "fp16" ]; then
     FLAGS="$FLAGS --fp16"
@@ -51,11 +44,9 @@ elif [ "$PRECISION" == "int8" ]; then
 fi
 
 echo "Running trtexec command..."
-echo "$TRTEXEC $FLAGS"
 $TRTEXEC $FLAGS
 
 echo "=========================================================="
 echo " TensorRT Engine successfully built: $ENGINE_FILE"
 echo "=========================================================="
-
 

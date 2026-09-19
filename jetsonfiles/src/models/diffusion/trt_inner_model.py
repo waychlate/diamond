@@ -45,12 +45,6 @@ class TRTInnerModel(nn.Module):
         self.is_v3 = hasattr(self.engine, "num_io_tensors")
         self.input_names = ["noisy_next_obs", "c_noise", "obs", "act"]
         self.output_names = ["denoised_output"]
-        if not self.is_v3:
-            self.binding_indices = {
-                name: self.engine.get_binding_index(name)
-                for name in self.input_names + self.output_names
-                if self.engine.get_binding_index(name) != -1
-            }
 
     def forward(self, noisy_next_obs: Tensor, c_noise: Tensor, obs: Tensor, act: Tensor) -> Tensor:
         b = noisy_next_obs.shape[0]
@@ -66,10 +60,10 @@ class TRTInnerModel(nn.Module):
 
         if self.is_v3:
             # Modern TensorRT 8.6+ / 10+ API
-            self.context.set_input_shape("noisy_next_obs", tuple(noisy_next_obs.shape))
-            self.context.set_input_shape("c_noise", tuple(c_noise.shape))
-            self.context.set_input_shape("obs", tuple(obs.shape))
-            self.context.set_input_shape("act", tuple(act.shape))
+            self.context.set_input_shape("noisy_next_obs", noisy_next_obs.shape)
+            self.context.set_input_shape("c_noise", c_noise.shape)
+            self.context.set_input_shape("obs", obs.shape)
+            self.context.set_input_shape("act", act.shape)
 
             self.context.set_tensor_address("noisy_next_obs", noisy_next_obs.data_ptr())
             self.context.set_tensor_address("c_noise", c_noise.data_ptr())
@@ -80,22 +74,15 @@ class TRTInnerModel(nn.Module):
             stream_ptr = torch.cuda.current_stream(self.device).cuda_stream
             self.context.execute_async_v3(stream_handle=stream_ptr)
         else:
-            # Classic TensorRT v2 API (TRT 8.2 - 8.5)
-            self.context.set_binding_shape(self.binding_indices["noisy_next_obs"], tuple(noisy_next_obs.shape))
-            self.context.set_binding_shape(self.binding_indices["c_noise"], tuple(c_noise.shape))
-            self.context.set_binding_shape(self.binding_indices["obs"], tuple(obs.shape))
-            self.context.set_binding_shape(self.binding_indices["act"], tuple(act.shape))
-
-            num_bindings = len(self.binding_indices)
-            bindings = [0] * num_bindings
-            bindings[self.binding_indices["noisy_next_obs"]] = noisy_next_obs.data_ptr()
-            bindings[self.binding_indices["c_noise"]] = c_noise.data_ptr()
-            bindings[self.binding_indices["obs"]] = obs.data_ptr()
-            bindings[self.binding_indices["act"]] = act.data_ptr()
-            bindings[self.binding_indices["denoised_output"]] = output.data_ptr()
-
-            stream_ptr = torch.cuda.current_stream(self.device).cuda_stream
-            self.context.execute_async_v2(bindings=bindings, stream_handle=stream_ptr)
+            # Classic TensorRT v2 API
+            bindings = [
+                noisy_next_obs.data_ptr(),
+                c_noise.data_ptr(),
+                obs.data_ptr(),
+                act.data_ptr(),
+                output.data_ptr(),
+            ]
+            self.context.execute_v2(bindings=bindings)
 
         return output
 

@@ -47,14 +47,7 @@ class Denoiser(nn.Module):
 
     @property
     def device(self) -> torch.device:
-        if hasattr(self.inner_model, "noise_emb") and hasattr(self.inner_model.noise_emb, "weight"):
-            return self.inner_model.noise_emb.weight.device
-        if hasattr(self.inner_model, "device"):
-            return self.inner_model.device
-        try:
-            return next(self.parameters()).device
-        except StopIteration:
-            return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        return self.inner_model.noise_emb.weight.device
 
     def setup_training(self, cfg: SigmaDistributionConfig) -> None:
         assert self.sample_sigma_training is None

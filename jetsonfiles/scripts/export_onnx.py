@@ -18,7 +18,7 @@ OmegaConf.register_new_resolver("eval", eval)
 def export_unet_onnx(
     checkpoint_path: str,
     output_onnx_path: str = "diamond_unet_highway.onnx",
-    opset_version: int = 14,
+    opset_version: int = 17,
 ):
     print(f"Loading DIAMOND model with Hydra config for ONNX export...")
     with initialize(version_base="1.3", config_path="../config"):
@@ -85,7 +85,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Export DIAMOND UNet InnerModel to ONNX")
     parser.add_argument("--checkpoint", type=str, default="diamond_highway_mcts.pt", help="Path to checkpoint .pt file")
     parser.add_argument("--output", type=str, default="diamond_unet_highway.onnx", help="Output path for .onnx file")
-    parser.add_argument("--opset", type=int, default=14, help="ONNX opset version (default: 14 for TRT 8.2+ compatibility)")
+    parser.add_argument("--opset", type=int, default=17, help="ONNX opset version (default: 17)")
     args = parser.parse_args()
 
     export_unet_onnx(args.checkpoint, args.output, args.opset)
