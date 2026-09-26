@@ -9,7 +9,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32gb
 #SBATCH --gres=gpu:1
-#SBATCH --time=12:00:00
+#SBATCH --time=24:00:00
 
 echo "Job Start"
 date; hostname; pwd
@@ -39,7 +39,8 @@ echo "--- Starting Latent TTC Head Training ---"
 python scripts/train_latent_ttc.py \
     --checkpoint diamond_highway_mcts.pt \
     --dataset_path /blue/iruchkin/khek.do/diamond_dataset_1000 \
-    --save_path checkpoints/best_latent_ttc.pt \
+    --save_path checkpoints/best_latent_mse_ttc.pt \
+    --loss_fn mse \
     --epochs 50 \
     --batch_size 32 \
     --lr 1e-4 \
@@ -53,14 +54,14 @@ python scripts/train_latent_ttc.py \
 echo "--- Running Latent TTC Evaluation ---"
 python scripts/evaluate_diamond_ttc.py \
     --checkpoint diamond_highway_mcts.pt \
-    --ttc-model checkpoints/best_latent_ttc.pt \
+    --ttc-model checkpoints/best_latent_mse_ttc.pt \
     --dataset_path /blue/iruchkin/khek.do/diamond_dataset_1000 \
     --mode latent \
     --episodes 10 \
     --context_len 20 \
     --rollout_steps 30 \
     --dt 0.1 \
-    --output_dir visualizations/latent_ttc_eval
+    --output_dir visualizations/latent_mse_ttc_eval
 
 echo "Job End"
 date

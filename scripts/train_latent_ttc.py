@@ -275,7 +275,12 @@ def train_latent_ttc(args):
             pred_ttc, _ = ttc_head(latents_seq)  # (B, context_len, 1)
             
             # Compute loss only on valid non-padded steps
-            loss = F.smooth_l1_loss(pred_ttc[masks], targets[masks])
+            if args.loss_fn == "mse":
+                loss = F.mse_loss(pred_ttc[masks], targets[masks])
+            elif args.loss_fn in ("huber", "smooth_l1"):
+                loss = F.smooth_l1_loss(pred_ttc[masks], targets[masks])
+            else:
+                raise ValueError(f"Unsupported loss function: {args.loss_fn}")
             
             optimizer.zero_grad()
             loss.backward()
@@ -358,6 +363,7 @@ def train_latent_ttc(args):
                     "use_temporal_lstm": not args.no_lstm,
                     "context_len": args.context_len,
                     "dt": args.dt,
+                    "loss_fn": args.loss_fn,
                 }
             }
             torch.save(checkpoint_payload, args.save_path)
@@ -371,6 +377,7 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint", type=str, default="diamond_highway_mcts.pt", help="Path to pretrained DIAMOND model")
     parser.add_argument("--dataset_path", type=str, default="dataset_mcts", help="Path to processed DIAMOND dataset")
     parser.add_argument("--save_path", type=str, default="checkpoints/best_latent_ttc.pt", help="Output path for trained TTC weights")
+    parser.add_argument("--loss_fn", type=str, default="mse", choices=["mse", "huber", "smooth_l1"], help="Loss function for training TTC head (default: mse)")
     parser.add_argument("--epochs", type=int, default=50, help="Number of training epochs")
     parser.add_argument("--steps_per_epoch", type=int, default=100, help="Number of batches/steps per epoch (default: 100)")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
