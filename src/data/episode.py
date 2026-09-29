@@ -35,7 +35,7 @@ class Episode:
 
     @classmethod
     def load(cls, path: Path, map_location: Optional[torch.device] = None) -> Episode:
-        raw = torch.load(Path(path), map_location=map_location)
+        raw = torch.load(Path(path), map_location=map_location, weights_only=False)
         d = {}
         for k, v in raw.items():
             if k == "obs" and isinstance(v, torch.Tensor) and v.dtype == torch.uint8:
