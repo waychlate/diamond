@@ -19,7 +19,7 @@ set -e
 
 mkdir -p logs
 mkdir -p checkpoints
-mkdir -p visualizations/latent_mse_ttc_eval_50eps
+mkdir -p visualizations/latent_huber_heun_ttc_eval_50eps
 
 module purge
 module load python/3.11
@@ -33,14 +33,14 @@ source .venv/bin/activate
 echo "--- Running Latent TTC Evaluation, MSE loss head (50 Episodes) ---"
 python scripts/evaluate_diamond_ttc.py \
     --checkpoint diamond_highway_mcts.pt \
-    --ttc-model checkpoints/best_latent_mse_ttc.pt \
+    --ttc-model checkpoints/best_latent_ttc.pt \
     --dataset_path /blue/iruchkin/khek.do/diamond_dataset_1000 \
     --mode latent \
     --episodes 50 \
     --context_len 20 \
     --rollout_steps 30 \
     --dt 0.1 \
-    --output_dir visualizations/latent_mse_ttc_eval_50eps
+    --output_dir visualizations/latent_huber_heun_ttc_eval_50eps
 
 echo "Job End"
 date

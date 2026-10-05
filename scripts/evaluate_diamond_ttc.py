@@ -165,6 +165,9 @@ def evaluate_diamond_ttc(
     step_pixel_mses = [[] for _ in range(rollout_steps)]
     step_pixel_maes = [[] for _ in range(rollout_steps)]
     step_pixel_psnrs = [[] for _ in range(rollout_steps)]
+    # Control: same head fed REAL frames at the same steps (isolates world-model drift from head error)
+    step_real_maes = [[] for _ in range(rollout_steps)]
+    step_real_mses = [[] for _ in range(rollout_steps)]
     
     all_records: List[Dict[str, Any]] = []
     all_gt: List[List[float]] = []
@@ -252,6 +255,8 @@ def evaluate_diamond_ttc(
         
         future_gt_ttc = []
         future_pred_ttc = []
+        future_pred_real = []
+        hx_real = hx_cx  # LSTM returns new tensors, so the dream loop below won't mutate this
         ep_pixel_mses = []
         
         for step in range(rollout_steps):
@@ -280,6 +285,17 @@ def evaluate_diamond_ttc(
             else:
                 pred_val = 0.0
                 
+            # 4b. Control: same head and LSTM state, but on the real frame window ending at future_idx
+            if mode == "latent" and ttc_predictor is not None:
+                z_real = agent.denoiser.extract_latent(
+                    obs[:, future_idx - num_cond + 1 : future_idx + 1],
+                    act[:, future_idx - num_cond + 1 : future_idx + 1],
+                )
+                pred_real, hx_real = ttc_predictor(z_real.unsqueeze(1), hx_real)
+                real_val = float(pred_real.squeeze().item())
+            else:
+                real_val = 0.0
+
             # 5. Ground truth future TTC for step + 1
             if has_obs_ttc and future_idx < len(batch.info[0]["obs_ttc"]):
                 raw_val = float(batch.info[0]["obs_ttc"][future_idx].item())
@@ -295,12 +311,15 @@ def evaluate_diamond_ttc(
                 
             future_gt_ttc.append(true_ttc)
             future_pred_ttc.append(pred_val)
+            future_pred_real.append(real_val)
             ep_pixel_mses.append(pixel_mse)
             
             error_mae = abs(pred_val - true_ttc)
             error_mse = (pred_val - true_ttc) ** 2
             step_maes[step].append(error_mae)
             step_mses[step].append(error_mse)
+            step_real_maes[step].append(abs(real_val - true_ttc))
+            step_real_mses[step].append((real_val - true_ttc) ** 2)
             step_pixel_mses[step].append(pixel_mse)
             step_pixel_maes[step].append(pixel_mae)
             step_pixel_psnrs[step].append(pixel_psnr)
@@ -310,6 +329,8 @@ def evaluate_diamond_ttc(
                 "lookahead_step": step + 1,
                 "ground_truth_ttc": round(true_ttc, 4),
                 "predicted_ttc": round(pred_val, 4),
+                "real_predicted_ttc": round(real_val, 4),
+                "real_abs_error": round(abs(real_val - true_ttc), 4),
                 "abs_error": round(error_mae, 4),
                 "squared_error": round(error_mse, 4),
                 "pixel_mse": round(pixel_mse, 6),
@@ -330,6 +351,7 @@ def evaluate_diamond_ttc(
             plt.plot(past_x, context_gt_ttc, color="gray", linestyle="--", label="Ground Truth (Past Context)", linewidth=1.8)
             plt.plot(past_x, context_pred_ttc, color="darkcyan", linestyle="-", label="TTC Tracking (Past Context)", linewidth=2.0)
             plt.plot(future_x, future_gt_ttc, color="green", linestyle="--", label="Ground Truth (Future)", linewidth=2.0)
+            plt.plot(future_x, future_pred_real, color="darkorange", linestyle="-", label="Predicted TTC (Real-frame control)", linewidth=1.8)
             plt.plot(future_x, future_pred_ttc, color="royalblue", linestyle="-", label=f"Predicted TTC ({mode.capitalize()} Dream)", linewidth=2.2)
             plt.axvline(x=0, color="crimson", linestyle=":", linewidth=2, label="Current Moment (T=0, Dream Begins)")
             
@@ -351,7 +373,9 @@ def evaluate_diamond_ttc(
             "lookahead_step",
             "ground_truth_ttc",
             "predicted_ttc",
+            "real_predicted_ttc",
             "abs_error",
+            "real_abs_error",
             "squared_error",
             "pixel_mse",
             "pixel_mae",
@@ -373,6 +397,8 @@ def evaluate_diamond_ttc(
             "mean_mae",
             "std_mae",
             "mean_rmse",
+            "real_mean_mse",
+            "real_mean_mae",
             "mean_pixel_mse",
             "std_pixel_mse",
             "sem_pixel_mse",
@@ -407,6 +433,8 @@ def evaluate_diamond_ttc(
                 "mean_mae": round(m_mae, 4),
                 "std_mae": round(s_mae, 4),
                 "mean_rmse": round(m_rmse, 4),
+                "real_mean_mse": round(float(np.mean(step_real_mses[step])), 4) if step_real_mses[step] else 0.0,
+                "real_mean_mae": round(float(np.mean(step_real_maes[step])), 4) if step_real_maes[step] else 0.0,
                 "mean_pixel_mse": round(m_pmse, 6),
                 "std_pixel_mse": round(s_pmse, 6),
                 "sem_pixel_mse": round(sem_pmse, 6),
@@ -552,6 +580,7 @@ def evaluate_diamond_ttc(
             "pixel_mse_vs_ttc_mse_pearson_r": round(corr_pix_mse_vs_ttc_mse["pearson_r"], 4),
             "pixel_mse_vs_ttc_mse_spearman_rho": round(corr_pix_mse_vs_ttc_mse["spearman_rho"], 4),
             "num_zero_or_near_zero_mse_instances": len(zero_mse_records),
+            "real_control_mae_seconds": round(float(np.mean([r["real_abs_error"] for r in all_records])), 4),
             "lowest_recorded_mse": round(top_50_lowest_records[0]["squared_error"], 6) if top_50_lowest_records else 0.0,
             "mode": mode
         }
@@ -609,6 +638,21 @@ def evaluate_diamond_ttc(
         plt.savefig(os.path.join(output_dir, "latent_ttc_mse_horizon.png"))
         plt.close()
         print(f"Saved Average MSE Lookahead Plot to {mse_plot_path}")
+
+    # 7b. Visualization: dream vs real-frame control (gap = world-model drift)
+    if any(len(errs) > 0 for errs in step_mses):
+        xs = np.arange(1, rollout_steps + 1)
+        plt.figure(figsize=(8, 5), dpi=200)
+        plt.plot(xs, [np.mean(e) for e in step_maes], marker="o", color="#d62728", label="Dream frames (world model)")
+        plt.plot(xs, [np.mean(e) for e in step_real_maes], marker="s", color="darkorange", label="Real frames (control)")
+        plt.xlabel("Lookahead Step")
+        plt.ylabel("TTC MAE (s)")
+        plt.title("TTC Error: Dream vs Real-frame Control\n(gap = world-model drift, control = head error alone)")
+        plt.grid(True, linestyle="--", alpha=0.5)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, "dream_vs_real_control.png"))
+        plt.close()
 
     # 8. Visualization 2: Correlation Scatter Plot (Pixel Loss vs TTC Loss)
     if len(all_records) > 0:

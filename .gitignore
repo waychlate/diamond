@@ -14,7 +14,9 @@ dataset_mcts
 visualizations
 logs/
 *.pt
-models
+models/
+papers/
+notes/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

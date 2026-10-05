@@ -40,7 +40,7 @@ python scripts/train_latent_ttc.py \
     --checkpoint diamond_highway_mcts.pt \
     --dataset_path /blue/iruchkin/khek.do/diamond_dataset_1000 \
     --save_path checkpoints/best_latent_mse_ttc.pt \
-    --loss_fn mse \
+    --loss_fn huber \
     --epochs 50 \
     --batch_size 32 \
     --lr 1e-4 \
