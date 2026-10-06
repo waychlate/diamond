@@ -81,19 +81,17 @@ class Denoiser(nn.Module):
         return self.inner_model.extract_latent(rescaled_obs, act)
     
     @torch.no_grad()
-    def wrap_model_output(self, noisy_next_obs: Tensor, model_output: Tensor, cs: Conditioners, quantize: bool = True) -> Tensor:
+    def wrap_model_output(self, noisy_next_obs: Tensor, model_output: Tensor, cs: Conditioners) -> Tensor:
         d = cs.c_skip * noisy_next_obs + cs.c_out * model_output
-        if not quantize:
-            return d.clamp(-1, 1)
         # Quantize to {0, ..., 255}, then back to [-1, 1]
         d = d.clamp(-1, 1).add(1).div(2).mul(255).byte().div(255).mul(2).sub(1)
         return d
     
     @torch.no_grad()
-    def denoise(self, noisy_next_obs: Tensor, sigma: Tensor, obs: Tensor, act: Tensor, quantize: bool = True) -> Tensor:
+    def denoise(self, noisy_next_obs: Tensor, sigma: Tensor, obs: Tensor, act: Tensor) -> Tensor:
         cs = self.compute_conditioners(sigma)
         model_output = self.compute_model_output(noisy_next_obs, obs, act, cs)
-        denoised = self.wrap_model_output(noisy_next_obs, model_output, cs, quantize)
+        denoised = self.wrap_model_output(noisy_next_obs, model_output, cs)
         return denoised
 
     def forward(self, batch: Batch) -> LossAndLogs:

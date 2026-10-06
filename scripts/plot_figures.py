@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-BLUE, ORANGE = "#2457A6", "#B34712"
+BLUE, ORANGE, RED = "#2457A6", "#B34712", "#C62828"
 
 
 def load(run_dir: str) -> pd.DataFrame:
@@ -19,14 +19,11 @@ def solver_figure(euler_dir: str, heun_dir: str, out: str, heun_label: str) -> N
     e, h = load(euler_dir), load(heun_dir)
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 4.8), dpi=200)
 
-    lo = min(e.pixel_mse.min(), h.pixel_mse.min())
-    hi = max(e.pixel_mse.max(), h.pixel_mse.max())
-    bins = np.logspace(np.log10(lo), np.log10(hi), 40)
+    bins = np.linspace(0, max(e.pixel_mse.max(), h.pixel_mse.max()) * 1.02, 50)
     for df, color, name in ((e, BLUE, "Euler"), (h, ORANGE, heun_label)):
         ax1.hist(df.pixel_mse, bins=bins, color=color, alpha=0.6,
                  label=f"{name} (mean {df.pixel_mse.mean():.3f})")
-    ax1.set_xscale("log")
-    ax1.set_xlabel("Pixel MSE (per generated frame, log scale)")
+    ax1.set_xlabel("Pixel MSE (per generated frame)")
     ax1.set_ylabel("Count")
     ax1.set_title("Generated-frame error")
 
@@ -41,7 +38,7 @@ def solver_figure(euler_dir: str, heun_dir: str, out: str, heun_label: str) -> N
     for ax in (ax1, ax2):
         ax.grid(True, linestyle="--", alpha=0.4)
         ax.legend()
-    fig.suptitle(f"Euler vs. {heun_label}: {len(e)} points each (runs used different random episodes)", fontweight="bold")
+    fig.suptitle(f"Euler vs. {heun_label}: {e.episode.nunique()} episodes x {e.lookahead_step.nunique()} steps = {len(e)} points each", fontweight="bold")
     fig.tight_layout()
     fig.savefig(out)
     plt.close(fig)
@@ -49,7 +46,7 @@ def solver_figure(euler_dir: str, heun_dir: str, out: str, heun_label: str) -> N
 
 
 def control_figure(run_dir: str, out: str, dream_label: str) -> None:
-    """TTC MAE vs. lookahead step for generated frames and the real-frame control, with SEM bands."""
+    """TTC MAE vs. lookahead step for generated frames and the real-frame control."""
     d = load(run_dir)
     if "real_abs_error" not in d:
         raise SystemExit(f"{run_dir} has no real_abs_error column: rerun the eval with the control.")
@@ -58,14 +55,35 @@ def control_figure(run_dir: str, out: str, dream_label: str) -> None:
     steps = n.index.values
     plt.figure(figsize=(8.5, 5), dpi=200)
     for col, color, label in (("abs_error", ORANGE, dream_label), ("real_abs_error", BLUE, "Real frames (control)")):
-        m, s = g[col].mean(), g[col].std() / np.sqrt(n)
-        plt.plot(steps, m, color=color, marker="o", markersize=3.5, linewidth=2, label=f"{label} (mean {d[col].mean():.2f} s)")
-        plt.fill_between(steps, m - s, m + s, color=color, alpha=0.2)
+        plt.plot(steps, g[col].mean(), color=color, marker="o", markersize=3.5, linewidth=2, label=f"{label} (mean {d[col].mean():.2f} s)")
     plt.xlabel("Lookahead step")
     plt.ylabel("TTC MAE (s)")
-    plt.title(f"TTC MAE vs. lookahead, {int(n.max())} episodes (band = ±1 SEM)", fontweight="bold")
+    plt.title(f"TTC MAE vs. lookahead, {int(n.max())} episodes", fontweight="bold")
     plt.grid(True, linestyle="--", alpha=0.4)
     plt.legend()
+    plt.tight_layout()
+    plt.savefig(out)
+    plt.close()
+    print(f"Saved {out}")
+
+
+def points_figure(run_dir: str, out: str, dream_label: str) -> None:
+    """Every (episode, step) TTC absolute error vs. lookahead step: generated frames red, real frames blue."""
+    d = load(run_dir)
+    if "real_abs_error" not in d:
+        raise SystemExit(f"{run_dir} has no real_abs_error column: rerun the eval with the control.")
+    rng = np.random.default_rng(0)
+    jitter = lambda: rng.uniform(-0.2, 0.2, len(d))  # spread points sideways so they don't stack
+    plt.figure(figsize=(10, 5.5), dpi=200)
+    for col, color, label in (("abs_error", RED, dream_label), ("real_abs_error", BLUE, "Real frames (control)")):
+        plt.scatter(d.lookahead_step + jitter(), d[col], s=9, color=color, alpha=0.3, edgecolors="none")
+        plt.plot(*zip(*d.groupby("lookahead_step")[col].mean().items()), color=color, linewidth=2.5,
+                 label=f"{label} (mean {d[col].mean():.2f} s)")
+    plt.xlabel("Lookahead step")
+    plt.ylabel("TTC absolute error (s)")
+    plt.title(f"TTC error at every point: {d.episode.nunique()} episodes x {d.lookahead_step.nunique()} steps (lines = mean per step)", fontweight="bold")
+    plt.grid(True, linestyle="--", alpha=0.4)
+    plt.legend(loc="upper left")
     plt.tight_layout()
     plt.savefig(out)
     plt.close()
@@ -84,9 +102,15 @@ if __name__ == "__main__":
     c.add_argument("--run", required=True, help="Eval folder produced with the control")
     c.add_argument("--dream-label", default="Generated frames (Euler)")
     c.add_argument("--out", default="visualizations/figures/control_vs_generated.png")
+    q = sub.add_parser("points", help="All per-point TTC errors vs. lookahead step (dream vs. control)")
+    q.add_argument("--run", required=True, help="Eval folder produced with the control")
+    q.add_argument("--dream-label", default="Generated frames (Euler)")
+    q.add_argument("--out", default="visualizations/figures/ttc_error_all_points.png")
     a = p.parse_args()
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
     if a.cmd == "solver":
         solver_figure(a.euler, a.heun, a.out, a.heun_label)
+    elif a.cmd == "points":
+        points_figure(a.run, a.out, a.dream_label)
     else:
         control_figure(a.run, a.out, a.dream_label)

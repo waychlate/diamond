@@ -79,6 +79,7 @@ def evaluate_diamond_ttc(
     max_ttc: Optional[float] = None,
     output_dir: str = "visualizations/latent_ttc_eval",
     seed: int = 0,
+    order: Optional[int] = None,
 ):
     """
     Evaluates Time-to-Collision (TTC) prediction performance with context_len history frames
@@ -105,6 +106,8 @@ def evaluate_diamond_ttc(
     else:
         print(f"Warning: Checkpoint {checkpoint_path} not found. Running with initialized weights.")
         
+    if order is not None:
+        cfg.world_model_env.diffusion_sampler.order = order  # 1: Euler, 2: Heun
     sampler = DiffusionSampler(agent.denoiser, cfg.world_model_env.diffusion_sampler)
     num_cond = cfg.agent.denoiser.inner_model.num_steps_conditioning
     print(f"DIAMOND conditioning history steps: {num_cond}")
@@ -792,6 +795,7 @@ if __name__ == "__main__":
     parser.add_argument("--dt", type=float, default=0.1, help="Time delta per step in seconds")
     parser.add_argument("--max_ttc", type=float, default=None, help="Fallback max TTC in seconds (default: None for uncapped)")
     parser.add_argument("--seed", type=int, default=0, help="Seed for episode selection and diffusion sampling (default: 0)")
+    parser.add_argument("--order", type=int, default=None, choices=[1, 2], help="Sampler order override (1: Euler, 2: Heun); default: config value")
     parser.add_argument("--output_dir", type=str, default="visualizations/latent_ttc_eval", help="Directory to save output plots and metrics")
     
     args = parser.parse_args()
@@ -807,4 +811,5 @@ if __name__ == "__main__":
         max_ttc=args.max_ttc,
         output_dir=args.output_dir,
         seed=args.seed,
+        order=args.order,
     )

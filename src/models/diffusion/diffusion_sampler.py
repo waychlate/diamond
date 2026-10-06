@@ -50,8 +50,7 @@ class DiffusionSampler:
             else:
                 # Heun's method
                 x_2 = x + d * dt
-                # no 8-bit quantization here: d_2 divides by next_sigma (down to sigma_min), which amplifies rounding error
-                denoised_2 = self.denoiser.denoise(x_2, next_sigma * s_in, prev_obs, prev_act, quantize=False)
+                denoised_2 = self.denoiser.denoise(x_2, next_sigma * s_in, prev_obs, prev_act)
                 d_2 = (x_2 - denoised_2) / next_sigma
                 d_prime = (d + d_2) / 2
                 x = x + d_prime * dt
