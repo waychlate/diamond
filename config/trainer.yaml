@@ -73,7 +73,7 @@ world_model_env:
     sigma_min: 2e-3
     sigma_max: 5.0
     rho: 7
-    order: 2  # 1: Euler, 2: Heun
+    order: 1  # 1: Euler, 2: Heun
     s_churn: 0.0  # Amount of stochasticity
     s_tmin: 0.0
     s_tmax: ${eval:'float("inf")'}

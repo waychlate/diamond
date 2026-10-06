@@ -78,11 +78,15 @@ def evaluate_diamond_ttc(
     dt: float = 0.1,
     max_ttc: Optional[float] = None,
     output_dir: str = "visualizations/latent_ttc_eval",
+    seed: int = 0,
 ):
     """
     Evaluates Time-to-Collision (TTC) prediction performance with context_len history frames
     and evaluates step-by-step TTC loss and visual pixel reconstruction loss over 1+ lookahead steps into the future.
     """
+    # BatchSampler draws episodes/segments with np.random and the diffusion sampler uses torch.randn
+    np.random.seed(seed)
+    torch.manual_seed(seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Evaluating DIAMOND TTC in [{mode.upper()}] mode on device: {device}")
     
@@ -582,7 +586,8 @@ def evaluate_diamond_ttc(
             "num_zero_or_near_zero_mse_instances": len(zero_mse_records),
             "real_control_mae_seconds": round(float(np.mean([r["real_abs_error"] for r in all_records])), 4),
             "lowest_recorded_mse": round(top_50_lowest_records[0]["squared_error"], 6) if top_50_lowest_records else 0.0,
-            "mode": mode
+            "mode": mode,
+            "seed": seed
         }
         json_path = os.path.join(output_dir, "eval_summary.json")
         with open(json_path, "w") as f:
@@ -786,6 +791,7 @@ if __name__ == "__main__":
     parser.add_argument("--rollout_steps", type=int, default=30, help="Number of future steps to rollout using DIAMOND")
     parser.add_argument("--dt", type=float, default=0.1, help="Time delta per step in seconds")
     parser.add_argument("--max_ttc", type=float, default=None, help="Fallback max TTC in seconds (default: None for uncapped)")
+    parser.add_argument("--seed", type=int, default=0, help="Seed for episode selection and diffusion sampling (default: 0)")
     parser.add_argument("--output_dir", type=str, default="visualizations/latent_ttc_eval", help="Directory to save output plots and metrics")
     
     args = parser.parse_args()
@@ -799,5 +805,6 @@ if __name__ == "__main__":
         rollout_steps=args.rollout_steps,
         dt=args.dt,
         max_ttc=args.max_ttc,
-        output_dir=args.output_dir
+        output_dir=args.output_dir,
+        seed=args.seed,
     )
