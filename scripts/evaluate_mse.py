@@ -96,9 +96,16 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint", type=str, required=True, help="Path to state.pt")
     parser.add_argument("--dataset_path", type=str, default="dataset_mcts", help="Path to dataset directory")
     parser.add_argument("--samples", type=int, default=500, help="Number of test samples to average over")
+    parser.add_argument("--sigma_data", type=float, default=None, help="Override agent.denoiser.sigma_data (must match training)")
+    parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
+
+    overrides = [] if args.sigma_data is None else [f"agent.denoiser.sigma_data={args.sigma_data}"]
     with initialize(version_base="1.3", config_path="../config"):
-        cfg = compose(config_name="trainer")
-        
+        cfg = compose(config_name="trainer", overrides=overrides)
+    print(f"sigma_data={cfg.agent.denoiser.sigma_data} seed={args.seed}")
+
     evaluate_pure_mse(cfg, args.checkpoint, args.dataset_path, args.samples)
