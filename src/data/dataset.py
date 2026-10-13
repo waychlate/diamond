@@ -45,7 +45,10 @@ class Dataset(StateDictMixin, torch.utils.data.Dataset):
         return self.num_steps
 
     def __getitem__(self, segment_id: SegmentId) -> Segment:
-        episode = self.load_episode(segment_id.episode_id)
+        if self._cache_in_ram:
+            episode = self.load_episode(segment_id.episode_id)
+        else:
+            episode = Episode.load(self._get_episode_path(segment_id.episode_id), raw_obs=True)
         return make_segment(episode, segment_id, should_pad=True)
 
     def __str__(self) -> str:

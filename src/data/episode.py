@@ -34,13 +34,10 @@ class Episode:
         return {"length": len(self), "return": self.rew.sum().item()}
 
     @classmethod
-    def load(cls, path: Path, map_location: Optional[torch.device] = None) -> Episode:
-        return cls(
-            **{
-                k: v.div(255).mul(2).sub(1) if k == "obs" else v
-                for k, v in torch.load(Path(path), map_location=map_location).items()
-            }
-        )
+    def load(cls, path: Path, map_location: Optional[torch.device] = None, raw_obs: bool = False) -> Episode:
+        # raw_obs: keep obs as mmapped uint8 so callers slicing a few frames don't read/convert the whole episode
+        d = torch.load(Path(path), map_location=map_location, mmap=raw_obs)
+        return cls(**{k: v.div(255).mul(2).sub(1) if k == "obs" and not raw_obs else v for k, v in d.items()})
 
     def save(self, path: Path) -> None:
         path = Path(path)

@@ -29,8 +29,12 @@ def make_segment(episode: Episode, segment_id: SegmentId, should_pad: bool = Tru
     stop = min(len(episode), segment_id.stop)
     mask_padding = torch.cat((torch.zeros(pad_len_left), torch.ones(stop - start), torch.zeros(pad_len_right))).bool()
 
+    obs = episode.obs[start:stop]
+    if obs.dtype == torch.uint8:  # raw episode from Dataset.__getitem__: convert only the slice, before padding
+        obs = obs.div(255).mul(2).sub(1)
+
     return Segment(
-        pad(episode.obs[start:stop]),
+        pad(obs),
         pad(episode.act[start:stop]),
         pad(episode.rew[start:stop]),
         pad(episode.end[start:stop]),
