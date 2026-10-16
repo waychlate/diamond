@@ -7,9 +7,10 @@
 #SBATCH --mem=32gb
 #SBATCH --gres=gpu:1
 #SBATCH --time=48:00:00
-# Usage: sbatch --export=ALL,SIGMA=0.15 slurm_train_sd.sh   (and SIGMA=0.5 for the control)
+# Usage: sbatch slurm_train_sd.sh 0.15   (and 0.5 for the control)
 set -e
-echo "Job Start  SIGMA=${SIGMA:?set SIGMA}"; date; hostname
+SIGMA=${1:?usage: sbatch slurm_train_sd.sh <sigma_data>}
+echo "Job Start  SIGMA=$SIGMA"; date; hostname
 mkdir -p logs
 module purge; module load python/3.11 cuda/12.1.1
 cd /home/khek.do/diamond
