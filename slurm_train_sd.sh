@@ -17,7 +17,7 @@ cd /home/khek.do/diamond
 source .venv/bin/activate
 # Only sigma_data differs between runs. To resume after timeout, from the run's output dir:
 # python src/main.py common.resume=True hydra.output_subdir=null hydra.run.dir=.
-python -u src/main.py agent.denoiser.sigma_data=$SIGMA common.seed=0 wandb.name=sd$SIGMA \
+python -u src/main.py agent.denoiser.sigma_data=$SIGMA common.seed=0 wandb.name=sd$SIGMA hydra.run.dir=outputs/sd${SIGMA}_${SLURM_JOB_ID} \
     static_dataset.path=/blue/iruchkin/khek.do/diamond_dataset_1000 \
     training.num_workers_data_loaders=8 training.cache_in_ram=False
 echo "Job End"; date
