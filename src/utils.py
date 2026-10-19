@@ -320,5 +320,7 @@ def try_until_no_except(func: Callable, max_tries: int = 5) -> None:
 
 
 def wandb_log(logs: Logs, epoch: int):
-    for d in logs:
-        wandb.log({"epoch": epoch, **d})
+    with open("metrics.jsonl", "a") as f:
+        for d in logs:
+            wandb.log({"epoch": epoch, **d})
+            f.write(json.dumps({"epoch": epoch, **d}, default=lambda v: v.tolist() if hasattr(v, "tolist") else str(v)) + "\n")

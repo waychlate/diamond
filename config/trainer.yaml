@@ -8,7 +8,7 @@ hydra:
     chdir: True
 
 wandb:
-  mode: online
+  mode: disabled  # metrics go to metrics.jsonl in the run dir instead
   project: null
   entity: null
   name: null
