@@ -6,6 +6,7 @@ from functools import partial
 import json
 from pathlib import Path
 import random
+import time
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from omegaconf import OmegaConf
@@ -308,16 +309,14 @@ def skip_if_run_is_over(func: Callable) -> Callable:
     return inner
 
 
-def try_until_no_except(func: Callable) -> None:
-    while True:
+def try_until_no_except(func: Callable, max_tries: int = 5) -> None:
+    for i in range(max_tries):
         try:
-            func()
-        except KeyboardInterrupt:
-            break
-        except Exception:
-            continue
-        else:
-            break
+            return func()
+        except Exception as e:
+            print(f"Attempt {i + 1}/{max_tries} failed: {e!r}", flush=True)
+            time.sleep(30)
+    raise RuntimeError(f"Giving up after {max_tries} attempts")
 
 
 def wandb_log(logs: Logs, epoch: int):
