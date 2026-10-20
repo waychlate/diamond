@@ -26,8 +26,8 @@ source .venv/bin/activate
 # Paths:
 # SRC_DIR: Directory containing raw 'train/' and 'test/' folders with episode_*.csv and episode_*.npz
 # DST_DIR: Output directory where processed DIAMOND .pt dataset will be saved
-SRC_DIR="/blue/iruchkin/khek.do/dataset_episodes_1000"
-DST_DIR="/blue/iruchkin/khek.do/diamond_dataset_1000"
+SRC_DIR="/blue/iruchkin/khek.do/dataset_episodes_1000_200steps"
+DST_DIR="/blue/iruchkin/khek.do/diamond_dataset_1000_200steps"
 
 echo "Source raw dataset: $SRC_DIR"
 echo "Destination DIAMOND dataset: $DST_DIR"
