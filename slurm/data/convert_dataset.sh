@@ -19,7 +19,7 @@ mkdir -p logs
 module purge
 module load python/3.11
 
-cd /home/khek.do/diamond
+cd "${PROJECT_DIR:-${SLURM_SUBMIT_DIR:-$PWD}}"
 
 source .venv/bin/activate
 

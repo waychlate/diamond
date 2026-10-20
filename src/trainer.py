@@ -44,8 +44,8 @@ class Trainer(StateDictMixin):
         self._rank = dist.get_rank() if dist.is_initialized() else 0
         self._world_size = dist.get_world_size() if dist.is_initialized() else 1
 
-        # Pick a random seed
-        set_seed(torch.seed() % 10 ** 9)
+        # Honor configured seeds; retain random initialization when none is specified.
+        set_seed(cfg.common.seed if cfg.common.seed is not None else torch.seed() % 10 ** 9)
 
         # Device
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu", self._rank)

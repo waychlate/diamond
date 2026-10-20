@@ -25,7 +25,7 @@ module purge
 module load python/3.11
 module load cuda/12.1.1
 
-cd /home/khek.do/diamond
+cd "${PROJECT_DIR:-${SLURM_SUBMIT_DIR:-$PWD}}"
 
 source .venv/bin/activate
 

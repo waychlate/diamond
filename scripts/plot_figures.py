@@ -90,6 +90,31 @@ def points_figure(run_dir: str, out: str, dream_label: str) -> None:
     print(f"Saved {out}")
 
 
+def heatmap_figure(run_dir: str, out: str, dream_label: str) -> None:
+    """2D histogram: TTC absolute error vs. lookahead step, one panel per path, each step column sums to 1."""
+    from matplotlib.colors import PowerNorm
+    d = load(run_dir)
+    if "real_abs_error" not in d:
+        raise SystemExit(f"{run_dir} has no real_abs_error column: rerun the eval with the control.")
+    n_steps = d.lookahead_step.nunique()
+    x_edges = np.arange(0.5, n_steps + 1.5)
+    y_edges = np.linspace(0, 15, 31)  # 0.5 s bins
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5), dpi=200, sharey=True)
+    for ax, col, cmap, label in ((axes[0], "abs_error", "Reds", dream_label), (axes[1], "real_abs_error", "Blues", "Real frames (control)")):
+        h, _, _ = np.histogram2d(d.lookahead_step, d[col].clip(0, 15), bins=[x_edges, y_edges])
+        h = h / h.sum(axis=1, keepdims=True)  # fraction of episodes at each step
+        m = ax.pcolormesh(x_edges, y_edges, h.T, cmap=cmap, norm=PowerNorm(0.5, vmin=0, vmax=1))
+        fig.colorbar(m, ax=ax, label="Fraction of episodes at that step")
+        ax.set_title(f"{label} (mean {d[col].mean():.2f} s)")
+        ax.set_xlabel("Lookahead step")
+    axes[0].set_ylabel("TTC absolute error (s)")
+    fig.suptitle(f"TTC error distribution vs. lookahead: {d.episode.nunique()} episodes, 0.5 s bins", fontweight="bold")
+    fig.tight_layout()
+    fig.savefig(out)
+    plt.close(fig)
+    print(f"Saved {out}")
+
+
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description="Figures for the Euler/Heun and control-vs-dream comparisons")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -106,11 +131,17 @@ if __name__ == "__main__":
     q.add_argument("--run", required=True, help="Eval folder produced with the control")
     q.add_argument("--dream-label", default="Generated frames (Euler)")
     q.add_argument("--out", default="visualizations/figures/ttc_error_all_points.png")
+    r = sub.add_parser("heatmap", help="2D histogram of TTC error vs. lookahead step (dream vs. control)")
+    r.add_argument("--run", required=True, help="Eval folder produced with the control")
+    r.add_argument("--dream-label", default="Generated frames (Euler)")
+    r.add_argument("--out", default="visualizations/figures/ttc_error_2d_histogram.png")
     a = p.parse_args()
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
     if a.cmd == "solver":
         solver_figure(a.euler, a.heun, a.out, a.heun_label)
     elif a.cmd == "points":
         points_figure(a.run, a.out, a.dream_label)
+    elif a.cmd == "heatmap":
+        heatmap_figure(a.run, a.out, a.dream_label)
     else:
         control_figure(a.run, a.out, a.dream_label)
