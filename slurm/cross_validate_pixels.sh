@@ -21,14 +21,14 @@ source /home/khek.do/diamond/.venv/bin/activate
 
 python -u scripts/prepare_pixel_data.py \
     --source /blue/iruchkin/khek.do/dataset_episodes_1000_200steps \
-    --output /blue/iruchkin/khek.do/diamond_pixel_200steps \
+    --output /blue/iruchkin/khek.do/diamond_dataset_1000_200steps \
     --seed 0
 
 # Python reads the fold index from Slurm automatically and aggregates completed folds.
 # To resume, add --resume to this command and keep the same --output directory.
 # For a new experiment, change --output instead.
 python -u scripts/cross_validate_pixels.py \
-    --data /blue/iruchkin/khek.do/diamond_pixel_200steps \
+    --data /blue/iruchkin/khek.do/diamond_dataset_1000_200steps \
     --output /blue/iruchkin/khek.do/diamond_pixel_results/cv_pixel_200steps \
     --epochs 50 \
     --workers 8 \

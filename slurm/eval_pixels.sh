@@ -20,13 +20,13 @@ source /home/khek.do/diamond/.venv/bin/activate
 
 python -u scripts/prepare_pixel_data.py \
     --source /blue/iruchkin/khek.do/dataset_episodes_1000_200steps \
-    --output /blue/iruchkin/khek.do/diamond_pixel_200steps \
+    --output /blue/iruchkin/khek.do/diamond_dataset_1000_200steps \
     --seed 0
 
 # Change --output for a new run; existing results are never overwritten.
 python -u scripts/evaluate_pixels.py \
-    --checkpoint /home/khek.do/diamond/models/original_diamond_highway_mcts.pt \
-    --dataset /blue/iruchkin/khek.do/diamond_pixel_200steps/test \
+    --checkpoint /home/khek.do/diamond/diamond_highway_mcts.pt \
+    --dataset /blue/iruchkin/khek.do/diamond_dataset_1000_200steps/test \
     --sigma-data 0.15 \
     --checkpoint-training-sigma 0.5 \
     --seed 0 \
