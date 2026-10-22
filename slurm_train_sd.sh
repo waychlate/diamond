@@ -1,6 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=diamond_sd
 #SBATCH --output=logs/diamond_sd_%j.log
+#SBATCH --mail-type=BEGIN,END,FAIL
+#SBATCH --mail-user=khek.do@ufl.edu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
