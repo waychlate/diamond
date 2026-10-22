@@ -148,6 +148,8 @@ def evaluate(dataset_path, checkpoint, output, *, config_path=None, sigma_data=0
         "mask": "KineMamba 0c7566d soft vehicle mask; blue=1, green=0.6; target-derived",
         "checkpoint": str(checkpoint), "checkpoint_training_sigma_data": checkpoint_training_sigma,
         "evaluation_sigma_data": sigma_data, "sigma_data_override": sigma_data != checkpoint_training_sigma,
+        "training_pixel_mask_gain": float(OmegaConf.select(cfg, "agent.denoiser.pixel_mask_gain", default=0.0)),
+        "training_pixel_mae_weight": float(OmegaConf.select(cfg, "agent.denoiser.pixel_mae_weight", default=0.0)),
         "dataset": str(dataset_path), "seed": seed, "batch_size": batch_size,
         "sampler_order": order, "conditioning_frames": num_cond,
         "episodes": len(episode_rows), "dataset_episodes": dataset.num_episodes,

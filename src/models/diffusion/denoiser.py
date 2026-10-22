@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import math
 from typing import Optional
 
 import torch
@@ -9,6 +10,7 @@ import torch.nn.functional as F
 from data import Batch
 from .inner_model import InnerModel, InnerModelConfig
 from utils import LossAndLogs
+from vehicle_mask import build_mask_from_fullres
 
 
 def add_dims(input: Tensor, n: int) -> Tensor:
@@ -36,12 +38,28 @@ class DenoiserConfig:
     inner_model: InnerModelConfig
     sigma_data: float
     sigma_offset_noise: float
+    pixel_mask_gain: float = 0.0
+    pixel_mae_weight: float = 0.0
+
+
+def vehicle_weighted_pixel_mae(prediction: Tensor, target: Tensor, gain: float) -> Tensor:
+    """Full-image MAE with additional target-derived vehicle weights, shared over RGB."""
+    if target.numel() == 0:
+        return prediction.sum() * 0.0
+    with torch.no_grad():
+        mask = build_mask_from_fullres(target, target.shape[-2], target.shape[-1])
+        weights = 1.0 + gain * mask
+    return ((prediction - target).abs() * weights).sum() / (weights.sum() * target.shape[1])
 
 
 class Denoiser(nn.Module):
     def __init__(self, cfg: DenoiserConfig) -> None:
         super().__init__()
         self.cfg = cfg
+        for name in ("pixel_mask_gain", "pixel_mae_weight"):
+            value = getattr(cfg, name)
+            if not math.isfinite(value) or value < 0:
+                raise ValueError(f"{name} must be finite and nonnegative")
         self.inner_model = InnerModel(cfg.inner_model)
         self.sample_sigma_training = None
 
@@ -97,15 +115,23 @@ class Denoiser(nn.Module):
     def forward(self, batch: Batch) -> LossAndLogs:
         n = self.cfg.inner_model.num_steps_conditioning
         seq_length = batch.obs.size(1) - n
+        if seq_length <= 0:
+            raise ValueError("A denoising batch must contain at least one frame after the conditioning context")
 
         all_obs = batch.obs.clone()
-        loss = 0
+        loss = next(self.inner_model.parameters()).sum() * 0.0
+        diffusion_mse = 0
+        pixel_mae = 0
+        valid_steps = 0
 
         for i in range(seq_length):
             obs = all_obs[:, i : n + i]
             next_obs = all_obs[:, n + i]
             act = batch.act[:, i : n + i]
             mask = batch.mask_padding[:, n + i]
+            if not mask.any():
+                continue
+            valid_steps += 1
 
             b, t, c, h, w = obs.shape
             obs = obs.reshape(b, t * c, h, w)
@@ -117,10 +143,29 @@ class Denoiser(nn.Module):
             model_output = self.compute_model_output(noisy_next_obs, obs, act, cs)
 
             target = (next_obs - cs.c_skip * noisy_next_obs) / cs.c_out
-            loss += F.mse_loss(model_output[mask], target[mask])
+            # Preserve the original preconditioned diffusion objective.
+            mse = F.mse_loss(model_output[mask], target[mask])
+            diffusion_mse = diffusion_mse + mse
+            loss = loss + mse
+            if self.cfg.pixel_mae_weight > 0:
+                # Use the continuous reconstruction: wrap_model_output quantizes and
+                # detaches it, which would prevent a pixel loss from teaching the model.
+                reconstructed = cs.c_skip * noisy_next_obs + cs.c_out * model_output
+                weighted_mae = vehicle_weighted_pixel_mae(
+                    reconstructed[mask], batch.obs[:, n + i][mask], self.cfg.pixel_mask_gain
+                )
+                pixel_mae = pixel_mae + weighted_mae
+                loss = loss + self.cfg.pixel_mae_weight * weighted_mae
 
             denoised = self.wrap_model_output(noisy_next_obs, model_output, cs)
             all_obs[:, n + i] = denoised
 
-        loss /= seq_length
-        return loss, {"loss_denoising": loss.detach()}
+        # Padding contributes neither error nor averaging weight. An entirely padded
+        # batch still returns a differentiable zero for the training loop.
+        denominator = max(valid_steps, 1)
+        loss = loss / denominator
+        logs = {"loss_denoising": loss.detach(),
+                "loss_diffusion_mse": torch.as_tensor(diffusion_mse / denominator, device=loss.device).detach()}
+        if self.cfg.pixel_mae_weight > 0:
+            logs["loss_weighted_pixel_mae"] = torch.as_tensor(pixel_mae / denominator, device=loss.device).detach()
+        return loss, logs

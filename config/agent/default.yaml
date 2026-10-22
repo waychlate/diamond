@@ -4,6 +4,9 @@ denoiser:
   _target_: models.diffusion.DenoiserConfig
   sigma_data: 0.5
   sigma_offset_noise: 0.3
+  # Optional auxiliary pixel MAE; zero weight preserves the baseline diffusion loss.
+  pixel_mask_gain: 0.0
+  pixel_mae_weight: 0.0
   inner_model:
     _target_: models.diffusion.InnerModelConfig
     img_channels: 3

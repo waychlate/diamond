@@ -1,7 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=diamond_pixel_cv
-#SBATCH --output=logs/pixel_cv_%A_%a.out
-#SBATCH --error=logs/pixel_cv_%A_%a.err
+#SBATCH --output=/blue/iruchkin/khek.do/diamond_pixel_results/logs/pixel_cv_%A_%a.out
+#SBATCH --error=/blue/iruchkin/khek.do/diamond_pixel_results/logs/pixel_cv_%A_%a.err
+#SBATCH --mail-type=BEGIN,END,FAIL
+#SBATCH --mail-user=khek.do@ufl.edu
 #SBATCH --array=0-4
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -12,6 +14,7 @@
 
 set -euo pipefail
 
+# Before submitting: mkdir -p /blue/iruchkin/khek.do/diamond_pixel_results/logs
 # Edit these paths to match your HiPerGator checkout and virtual environment.
 cd /home/khek.do/diamond-pixel-cv
 module purge
@@ -29,7 +32,9 @@ python -u scripts/prepare_pixel_data.py \
 # For a new experiment, change --output instead.
 python -u scripts/cross_validate_pixels.py \
     --data /blue/iruchkin/khek.do/diamond_dataset_1000_200steps \
-    --output /blue/iruchkin/khek.do/diamond_pixel_results/cv_pixel_200steps \
+    --output /blue/iruchkin/khek.do/diamond_pixel_results/cv_vehicle_weighted_pixel_200steps \
     --epochs 50 \
     --workers 8 \
+    --pixel-mask-gain 20 \
+    --pixel-mae-weight 1.0 \
     --batch-size 32

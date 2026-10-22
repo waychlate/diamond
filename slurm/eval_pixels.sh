@@ -1,7 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=diamond_pixel_eval
-#SBATCH --output=logs/pixel_eval_%j.out
-#SBATCH --error=logs/pixel_eval_%j.err
+#SBATCH --output=/blue/iruchkin/khek.do/diamond_pixel_results/logs/pixel_eval_%j.out
+#SBATCH --error=/blue/iruchkin/khek.do/diamond_pixel_results/logs/pixel_eval_%j.err
+#SBATCH --mail-type=BEGIN,END,FAIL
+#SBATCH --mail-user=khek.do@ufl.edu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
@@ -11,6 +13,7 @@
 
 set -euo pipefail
 
+# Before submitting: mkdir -p /blue/iruchkin/khek.do/diamond_pixel_results/logs
 # Edit these paths to match your HiPerGator checkout and virtual environment.
 cd /home/khek.do/diamond-pixel-cv
 module purge

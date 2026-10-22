@@ -10,10 +10,13 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def training_command(dataset, run, fold, *, resume=False, epochs=50, workers=8):
+def training_command(dataset, run, fold, *, resume=False, epochs=50, workers=8,
+                     pixel_mask_gain=0.0, pixel_mae_weight=0.0):
     command = [sys.executable, str(ROOT / "src/main.py"),
                f"static_dataset.path={dataset}", f"hydra.run.dir={run}",
                "initialization.path_to_ckpt=null", "agent.denoiser.sigma_data=0.15",
+               f"agent.denoiser.pixel_mask_gain={pixel_mask_gain}",
+               f"agent.denoiser.pixel_mae_weight={pixel_mae_weight}",
                f"common.seed={fold}", "common.devices=all", "wandb.mode=disabled",
                f"training.num_final_epochs={epochs}", f"training.num_workers_data_loaders={workers}",
                "training.cache_in_ram=False", "training.compile_wm=False"]
@@ -31,8 +34,18 @@ def run_fold(args):
         raise FileExistsError(f"{run} already exists; use --resume or a new --output")
     if args.resume and not (run / "checkpoints/state.pt").is_file():
         raise FileNotFoundError(f"Cannot resume without {run / 'checkpoints/state.pt'}")
+    if args.resume:
+        from omegaconf import OmegaConf
+        previous = OmegaConf.load(run / "config/trainer.yaml")
+        for name in ("pixel_mask_gain", "pixel_mae_weight"):
+            saved = OmegaConf.select(previous, f"agent.denoiser.{name}", default=0.0)
+            if float(saved) != getattr(args, name):
+                raise ValueError(f"Cannot resume with changed {name}: saved {saved}, requested {getattr(args, name)}. "
+                                 "Use the saved loss settings or start a new output directory.")
     subprocess.run(training_command(dataset, run, args.fold, resume=args.resume,
-                                   epochs=args.epochs, workers=args.workers), cwd=ROOT, check=True)
+                                   epochs=args.epochs, workers=args.workers,
+                                   pixel_mask_gain=args.pixel_mask_gain,
+                                   pixel_mae_weight=args.pixel_mae_weight), cwd=ROOT, check=True)
     evaluation = run / "pixel_eval"
     if (evaluation / "summary.json").is_file():
         print(f"Fold evaluation already complete: {evaluation}")
@@ -57,6 +70,9 @@ def aggregate(output):
         if not path.is_file():
             raise FileNotFoundError(f"All five folds must finish before aggregation; missing {path}")
         summaries.append(json.loads(path.read_text()))
+    for setting in ("training_pixel_mask_gain", "training_pixel_mae_weight"):
+        if len({summary.get(setting, 0.0) for summary in summaries}) != 1:
+            raise ValueError(f"Cannot aggregate folds trained with different {setting}")
     result = {"folds": 5, "fold_results": summaries,
               "note": "CV validation episodes only; preserved test set excluded"}
     for metric in ("masked_mae", "unmasked_mae"):
@@ -87,6 +103,8 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--pixel-mask-gain", type=float, default=0.0)
+    parser.add_argument("--pixel-mae-weight", type=float, default=0.0)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--aggregate", action="store_true")
     args = parser.parse_args()
