@@ -36,7 +36,7 @@ class Episode:
     @classmethod
     def load(cls, path: Path, map_location: Optional[torch.device] = None, raw_obs: bool = False) -> Episode:
         # raw_obs: keep obs as mmapped uint8 so callers slicing a few frames don't read/convert the whole episode
-        d = torch.load(Path(path), map_location=map_location, mmap=raw_obs)
+        d = torch.load(Path(path), map_location=map_location, mmap=raw_obs, weights_only=False)
         return cls(**{k: v.div(255).mul(2).sub(1) if k == "obs" and not raw_obs else v for k, v in d.items()})
 
     def save(self, path: Path) -> None:
