@@ -7,7 +7,7 @@
 #SBATCH --array=0-4
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=8
 #SBATCH --mem=32gb
 #SBATCH --gres=gpu:1
 #SBATCH --time=48:00:00
@@ -34,7 +34,7 @@ python -u scripts/cross_validate_pixels.py \
     --data /blue/iruchkin/khek.do/diamond_dataset_1000_200steps \
     --output /blue/iruchkin/khek.do/diamond_pixel_results/cv_vehicle_weighted_pixel_200steps \
     --epochs 50 \
-    --workers 4 \
+    --workers 8 \
     --pixel-mask-gain 20 \
     --pixel-mae-weight 1.0 \
     --batch-size 32
