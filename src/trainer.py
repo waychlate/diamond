@@ -419,7 +419,8 @@ class Trainer(StateDictMixin):
     def save_checkpoint(self) -> None:
         if self._rank == 0:
             save_with_backup(self.state_dict(), self._path_state_ckpt)
-            self.train_dataset.save_to_default_path()
-            self.test_dataset.save_to_default_path()
+            if not self._is_static_dataset:  # a static dataset's info.pt is shared, read-only input
+                self.train_dataset.save_to_default_path()
+                self.test_dataset.save_to_default_path()
             self._keep_agent_copies(self.agent.state_dict(), self.epoch)
             self._save_info_for_import_script(self.epoch)
