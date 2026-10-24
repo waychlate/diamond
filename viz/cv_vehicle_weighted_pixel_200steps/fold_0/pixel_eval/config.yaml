@@ -1,0 +1,219 @@
+wandb:
+  mode: disabled
+  project: null
+  entity: null
+  name: null
+  group: null
+  tags: null
+  notes: null
+initialization:
+  path_to_ckpt: null
+  load_denoiser: true
+  load_rew_end_model: true
+  load_actor_critic: true
+common:
+  devices: all
+  seed: 0
+  resume: false
+checkpointing:
+  save_agent_every: 1
+  num_to_keep: 11
+collection:
+  train:
+    num_envs: 0
+    epsilon: 0.01
+    num_steps_total: 0
+    first_epoch:
+      min: 5000
+      max: 10000
+      threshold_rew: 10
+    steps_per_epoch: 100
+  test:
+    num_envs: 1
+    num_episodes: 4
+    epsilon: 0.0
+    num_final_episodes: 100
+static_dataset:
+  path: /blue/iruchkin/khek.do/diamond_dataset_1000_200steps/folds/fold_0
+  ignore_sample_weights: true
+training:
+  should: true
+  num_final_epochs: 50
+  cache_in_ram: false
+  num_workers_data_loaders: 8
+  model_free: false
+  compile_wm: false
+evaluation:
+  should: true
+  every: 1
+world_model_env:
+  _target_: envs.WorldModelEnvConfig
+  horizon: 15
+  num_batches_to_preload: 256
+  diffusion_sampler:
+    _target_: models.diffusion.DiffusionSamplerConfig
+    num_steps_denoising: 3
+    sigma_min: 0.002
+    sigma_max: 5.0
+    rho: 7
+    order: 1
+    s_churn: 0.0
+    s_tmin: 0.0
+    s_tmax: .inf
+    s_noise: 1.0
+denoiser:
+  training:
+    num_autoregressive_steps: 1
+    start_after_epochs: 0
+    steps_first_epoch: 50000
+    steps_per_epoch: 1000
+    sample_weights:
+    - 0.1
+    - 0.1
+    - 0.1
+    - 0.7
+    batch_size: 16
+    grad_acc_steps: 2
+    lr_warmup_steps: 100
+    max_grad_norm: 1.0
+  optimizer:
+    lr: 0.0001
+    weight_decay: 0.01
+    eps: 1.0e-08
+  sigma_distribution:
+    _target_: models.diffusion.SigmaDistributionConfig
+    loc: -0.4
+    scale: 1.2
+    sigma_min: 0.002
+    sigma_max: 20
+rew_end_model:
+  training:
+    seq_length: 19
+    start_after_epochs: 0
+    steps_first_epoch: 10000
+    steps_per_epoch: 400
+    sample_weights:
+    - 0.1
+    - 0.1
+    - 0.1
+    - 0.7
+    batch_size: 8
+    grad_acc_steps: 4
+    lr_warmup_steps: 100
+    max_grad_norm: 100.0
+  optimizer:
+    lr: 0.0001
+    weight_decay: 0.01
+    eps: 1.0e-08
+actor_critic:
+  training:
+    sample_weights:
+    - 0.1
+    - 0.1
+    - 0.1
+    - 0.7
+    batch_size: 32
+    grad_acc_steps: 1
+    start_after_epochs: 999999
+    steps_first_epoch: 0
+    steps_per_epoch: 0
+    lr_warmup_steps: 100
+    max_grad_norm: 100.0
+  actor_critic_loss:
+    _target_: models.actor_critic.ActorCriticLossConfig
+    backup_every: 15
+    gamma: 0.985
+    lambda_: 0.95
+    weight_value_loss: 1.0
+    weight_entropy_loss: 0.001
+  optimizer:
+    lr: 0.0001
+    weight_decay: 0
+    eps: 1.0e-08
+env:
+  num_actions: 5
+  obs_shape:
+  - 3
+  - 48
+  - 320
+  train:
+    id: highway-v0
+    size:
+    - 48
+    - 320
+    max_episode_steps: 100
+  test:
+    id: highway-v0
+    size:
+    - 48
+    - 320
+    max_episode_steps: 100
+  keymap: highway
+agent:
+  _target_: agent.AgentConfig
+  denoiser:
+    _target_: models.diffusion.DenoiserConfig
+    sigma_data: 0.15
+    sigma_offset_noise: 0.3
+    pixel_mask_gain: 20.0
+    pixel_mae_weight: 1.0
+    inner_model:
+      _target_: models.diffusion.InnerModelConfig
+      img_channels: 3
+      num_steps_conditioning: 4
+      cond_channels: 256
+      depths:
+      - 2
+      - 2
+      - 2
+      - 2
+      channels:
+      - 64
+      - 64
+      - 64
+      - 64
+      attn_depths:
+      - 0
+      - 0
+      - 0
+      - 0
+  rew_end_model:
+    _target_: models.rew_end_model.RewEndModelConfig
+    lstm_dim: 512
+    img_channels: 3
+    img_size:
+    - 48
+    - 320
+    cond_channels: 128
+    depths:
+    - 2
+    - 2
+    - 2
+    - 2
+    channels:
+    - 32
+    - 32
+    - 32
+    - 32
+    attn_depths:
+    - 0
+    - 0
+    - 0
+    - 0
+  actor_critic:
+    _target_: models.actor_critic.ActorCriticConfig
+    lstm_dim: 512
+    img_channels: 3
+    img_size:
+    - 48
+    - 320
+    channels:
+    - 32
+    - 32
+    - 64
+    - 64
+    down:
+    - 1
+    - 1
+    - 1
+    - 1

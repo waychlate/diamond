@@ -1,0 +1,12 @@
+- static_dataset.path=/blue/iruchkin/khek.do/diamond_dataset_1000_200steps/folds/fold_0
+- initialization.path_to_ckpt=null
+- agent.denoiser.sigma_data=0.15
+- agent.denoiser.pixel_mask_gain=20.0
+- agent.denoiser.pixel_mae_weight=1.0
+- common.seed=0
+- common.devices=all
+- wandb.mode=disabled
+- training.num_final_epochs=50
+- training.num_workers_data_loaders=8
+- training.cache_in_ram=False
+- training.compile_wm=False
