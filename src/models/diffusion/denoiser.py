@@ -40,6 +40,8 @@ class DenoiserConfig:
     sigma_offset_noise: float
     pixel_mask_gain: float = 0.0
     pixel_mae_weight: float = 0.0
+    # 0 with pixel_mae_weight > 0 trains on the vehicle-weighted pixel MAE alone (KineMamba's pixel loss).
+    diffusion_mse_weight: float = 1.0
 
 
 def vehicle_weighted_pixel_mae(prediction: Tensor, target: Tensor, gain: float) -> Tensor:
@@ -56,10 +58,12 @@ class Denoiser(nn.Module):
     def __init__(self, cfg: DenoiserConfig) -> None:
         super().__init__()
         self.cfg = cfg
-        for name in ("pixel_mask_gain", "pixel_mae_weight"):
+        for name in ("pixel_mask_gain", "pixel_mae_weight", "diffusion_mse_weight"):
             value = getattr(cfg, name)
             if not math.isfinite(value) or value < 0:
                 raise ValueError(f"{name} must be finite and nonnegative")
+        if cfg.pixel_mae_weight == 0 and cfg.diffusion_mse_weight == 0:
+            raise ValueError("pixel_mae_weight and diffusion_mse_weight cannot both be zero")
         self.inner_model = InnerModel(cfg.inner_model)
         self.sample_sigma_training = None
 
@@ -143,10 +147,11 @@ class Denoiser(nn.Module):
             model_output = self.compute_model_output(noisy_next_obs, obs, act, cs)
 
             target = (next_obs - cs.c_skip * noisy_next_obs) / cs.c_out
-            # Preserve the original preconditioned diffusion objective.
+            # The original preconditioned diffusion objective; always logged, weighted into the loss.
             mse = F.mse_loss(model_output[mask], target[mask])
-            diffusion_mse = diffusion_mse + mse
-            loss = loss + mse
+            diffusion_mse = diffusion_mse + mse.detach()
+            if self.cfg.diffusion_mse_weight > 0:
+                loss = loss + self.cfg.diffusion_mse_weight * mse
             if self.cfg.pixel_mae_weight > 0:
                 # Use the continuous reconstruction: wrap_model_output quantizes and
                 # detaches it, which would prevent a pixel loss from teaching the model.

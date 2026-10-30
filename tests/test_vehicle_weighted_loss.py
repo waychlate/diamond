@@ -27,12 +27,13 @@ class ConstantModel(nn.Module):
         return self.bias.expand_as(noisy_obs)
 
 
-def tiny_denoiser(pixel_weight):
+def tiny_denoiser(pixel_weight, mse_weight=1.0):
     # Exercise the real denoising forward pass with a tiny substitute for the UNet.
     denoiser = Denoiser.__new__(Denoiser)
     nn.Module.__init__(denoiser)
     denoiser.cfg = DenoiserConfig(SimpleNamespace(num_steps_conditioning=1), 0.15, 0.0,
-                                  pixel_mask_gain=20.0, pixel_mae_weight=pixel_weight)
+                                  pixel_mask_gain=20.0, pixel_mae_weight=pixel_weight,
+                                  diffusion_mse_weight=mse_weight)
     denoiser.inner_model = ConstantModel()
     denoiser.sample_sigma_training = lambda n, device: torch.ones(n, device=device)
     return denoiser
@@ -83,11 +84,22 @@ class VehicleWeightedLossTests(unittest.TestCase):
         self.assertNotEqual(baseline.inner_model.bias.grad.item(), weighted.inner_model.bias.grad.item())
         self.assertTrue(torch.isfinite(weighted.inner_model.bias.grad))
 
+    def test_pixel_mae_only_drops_the_diffusion_term(self):
+        obs = torch.zeros(1, 2, 3, 8, 16)
+        obs[0, 1, 2, 2:6, 4:8] = 1.0
+        batch = Batch(obs, torch.zeros(1, 2, dtype=torch.long), None, None, None,
+                      torch.ones(1, 2, dtype=torch.bool), [], [])
+        torch.manual_seed(7)
+        loss, logs = tiny_denoiser(1, mse_weight=0)(batch)
+        self.assertTrue(torch.allclose(loss.detach(), logs["loss_weighted_pixel_mae"]))
+        self.assertGreater(logs["loss_diffusion_mse"].item(), 0)  # Still logged.
+
     def test_cv_forwards_loss_settings_and_rejects_changed_resume(self):
         command = training_command(Path("/data"), Path("/run"), 0,
-                                   pixel_mask_gain=20, pixel_mae_weight=1)
+                                   pixel_mask_gain=20, pixel_mae_weight=1, diffusion_mse_weight=0)
         self.assertIn("agent.denoiser.pixel_mask_gain=20", command)
         self.assertIn("agent.denoiser.pixel_mae_weight=1", command)
+        self.assertIn("agent.denoiser.diffusion_mse_weight=0", command)
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "data/folds/fold_0").mkdir(parents=True)
@@ -97,7 +109,8 @@ class VehicleWeightedLossTests(unittest.TestCase):
             (root / "runs/fold_0/config").mkdir()
             (root / "runs/fold_0/config/trainer.yaml").write_text("agent:\n  denoiser: {}\n")
             args = SimpleNamespace(data=root / "data", output=root / "runs", fold=0,
-                                   resume=True, pixel_mask_gain=20, pixel_mae_weight=1)
+                                   resume=True, pixel_mask_gain=20, pixel_mae_weight=1,
+                                   diffusion_mse_weight=0)
             with patch("cross_validate_pixels.subprocess.run") as run:
                 with self.assertRaisesRegex(ValueError, "Cannot resume with changed"):
                     run_fold(args)

@@ -17,5 +17,5 @@ Absolute image prediction error weighted by a target-frame spatial mask and norm
 _Avoid_: Masked training loss
 
 **Five-fold cross-validation**:
-Five independent training runs, each holding out a different fifth of the development episodes for evaluation. The preserved test set is outside these folds.
+Five independent training runs, each holding out a different fifth of the episodes for evaluation. As in KineMamba, the train and test splits are pooled before folding, so no episode stays outside CV.
 _Avoid_: Five partitions evaluated using one fixed checkpoint

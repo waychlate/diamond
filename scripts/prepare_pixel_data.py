@@ -1,4 +1,9 @@
-"""Convert raw episodes once and make five disjoint, symlink-backed CV datasets."""
+"""Convert raw episodes once and make five disjoint, symlink-backed CV datasets.
+
+Folds follow KineMamba's src/make_cv_folds.py: train and test episodes pooled in sorted
+file order, split with sklearn KFold(5, shuffle=True, random_state=seed). The same
+assignment is written to cv_folds.json in KineMamba's format so both models can read it.
+"""
 import argparse
 import fcntl
 import hashlib
@@ -21,6 +26,10 @@ def source_manifest(source):
         csvs = sorted((source / split).glob("episode_*_data.csv"))
         if not csvs:
             raise ValueError(f"No episode CSV files in {source / split}")
+        visuals = sorted(p.name.removesuffix("_visuals.npz") for p in (source / split).glob("*_visuals.npz"))
+        if visuals != [p.name.removesuffix("_data.csv") for p in csvs]:
+            # KineMamba lists episodes by their visuals files; the two listings must agree.
+            raise ValueError(f"Episode CSV and visuals files differ in {source / split}")
         records = []
         for csv in csvs:
             images = csv.with_name(csv.name.replace("_data.csv", "_visuals.npz"))
@@ -32,10 +41,20 @@ def source_manifest(source):
     return manifest
 
 
-def make_subset(source, ids, destination):
+def kfold(n, n_folds=5, seed=0):
+    """Validation indices of sklearn KFold(n_folds, shuffle=True, random_state=seed), without sklearn."""
+    order = np.arange(n)
+    np.random.RandomState(seed).shuffle(order)
+    sizes = np.full(n_folds, n // n_folds)
+    sizes[: n % n_folds] += 1
+    return [np.sort(order[stop - size:stop]) for size, stop in zip(sizes, np.cumsum(sizes))]
+
+
+def make_subset(episodes, destination):
+    """episodes: (converted dataset, episode id) pairs, possibly from both splits."""
     subset = Dataset(destination, save_on_disk=False)
     # Metadata comes from these episodes only; links reference the one converted copy.
-    for original_id in ids:
+    for source, original_id in episodes:
         episode = source.load_episode(int(original_id))
         new_id = subset.add_episode(episode)
         link = subset._get_episode_path(new_id)
@@ -47,7 +66,7 @@ def make_subset(source, ids, destination):
 def prepare(source, output, seed=0):
     source, output = Path(source).resolve(), Path(output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
-    manifest = {"version": 1, "source": str(source), "seed": seed,
+    manifest = {"version": 2, "source": str(source), "seed": seed,
                 "raw": source_manifest(source)}
     # An array job and the meeting evaluation can safely request the same preparation.
     with output.with_name(output.name + ".lock").open("w") as lock:
@@ -67,23 +86,28 @@ def prepare(source, output, seed=0):
                 if ds.num_episodes != len(manifest["raw"][split]["episodes"]):
                     raise ValueError(f"Conversion skipped episodes in {split}; preparation aborted")
                 datasets[split] = ds
-            train = datasets["train"]
-            if train.num_episodes < 5:
-                raise ValueError("Five-fold CV requires at least five training episodes")
-            chunks = np.array_split(np.random.default_rng(seed).permutation(train.num_episodes), 5)
-            for fold, held_out in enumerate(chunks):
-                train_ids = np.sort(np.concatenate([part for i, part in enumerate(chunks) if i != fold]))
-                val_ids = np.sort(held_out)
+            # Pooled order matches KineMamba: train episodes, then test, each sorted by name.
+            pooled = [(split, local_id) for split in ("train", "test")
+                      for local_id in range(datasets[split].num_episodes)]
+            names = [f"{split}/{manifest['raw'][split]['episodes'][i]}_visuals.npz" for split, i in pooled]
+            if len(pooled) < 5:
+                raise ValueError("Five-fold CV requires at least five episodes")
+            folds = []
+            for fold, val_ids in enumerate(kfold(len(pooled), 5, seed)):
+                train_ids = np.setdiff1d(np.arange(len(pooled)), val_ids)
+                folds.append({"train": [names[i] for i in train_ids], "val": [names[i] for i in val_ids]})
                 fold_dir = stage / "folds" / f"fold_{fold}"
-                make_subset(train, train_ids, fold_dir / "train")
-                make_subset(train, val_ids, fold_dir / "test")
+                make_subset([(datasets[pooled[i][0]], pooled[i][1]) for i in train_ids], fold_dir / "train")
+                make_subset([(datasets[pooled[i][0]], pooled[i][1]) for i in val_ids], fold_dir / "test")
                 (fold_dir / "split.json").write_text(json.dumps({
                     "fold": fold, "seed": seed, "train_ids": train_ids.tolist(),
                     "validation_ids": val_ids.tolist(),
-                    "train_episodes": [manifest["raw"]["train"]["episodes"][i] for i in train_ids],
-                    "validation_episodes": [manifest["raw"]["train"]["episodes"][i] for i in val_ids],
-                    "note": "fold test/ is validation; the preserved test set is never in CV",
+                    "train_episodes": folds[-1]["train"], "validation_episodes": folds[-1]["val"],
+                    "note": "fold test/ is validation; ids index the pooled train+test episode list",
                 }, indent=2) + "\n")
+            (stage / "cv_folds.json").write_text(json.dumps({
+                "seed": seed, "n_folds": 5, "data_dir": str(source),
+                "n_episodes": len(pooled), "folds": folds}, indent=2) + "\n")
             # Links must point at the final location, not the temporary staging directory.
             for link in (stage / "folds").rglob("*.pt"):
                 if link.is_symlink():

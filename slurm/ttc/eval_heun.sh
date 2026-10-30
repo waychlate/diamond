@@ -34,7 +34,7 @@ echo "--- Running Latent TTC Evaluation, Huber head, Heun (50 Episodes) ---"
 python scripts/evaluate_diamond_ttc.py \
     --checkpoint diamond_highway_mcts.pt \
     --ttc-model checkpoints/best_latent_ttc.pt \
-    --dataset_path /blue/iruchkin/khek.do/diamond_dataset_1000 \
+    --dataset_path /orange/iruchkin/khek.do/diamond_dataset_1000 \
     --mode latent \
     --episodes 50 \
     --context_len 20 \

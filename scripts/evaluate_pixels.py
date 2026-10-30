@@ -36,10 +36,13 @@ def add_totals(total, part):
 
 
 def with_mae(totals):
-    return {**totals,
-            "unmasked_mae": totals["absolute_error"] / totals["pixel_channels"],
-            "masked_mae": (totals["masked_absolute_error"] / totals["mask_weight_channels"]
-                           if totals["mask_weight_channels"] else None)}
+    unmasked = totals["absolute_error"] / totals["pixel_channels"]
+    masked = (totals["masked_absolute_error"] / totals["mask_weight_channels"]
+              if totals["mask_weight_channels"] else None)
+    # KineMamba scales pixels to [-0.5, 0.5], half this range, so the same error is half the MAE.
+    return {**totals, "unmasked_mae": unmasked, "masked_mae": masked,
+            "unmasked_mae_kinemamba_scale": unmasked / 2,
+            "masked_mae_kinemamba_scale": masked / 2 if masked is not None else None}
 
 
 def transition_batches(episode, num_cond, batch_size):
@@ -144,12 +147,14 @@ def evaluate(dataset_path, checkpoint, output, *, config_path=None, sigma_data=0
         writer.writerows(episode_rows)
     summary = {
         "protocol": "one_step_real_context", "value_range": [-1, 1],
+        "kinemamba_scale": "*_kinemamba_scale = MAE / 2, i.e. pixels in [-0.5, 0.5]",
         "aggregation": "sum_absolute_errors_divided_by_sum_pixel_or_mask_weights",
         "mask": "KineMamba 0c7566d soft vehicle mask; blue=1, green=0.6; target-derived",
         "checkpoint": str(checkpoint), "checkpoint_training_sigma_data": checkpoint_training_sigma,
         "evaluation_sigma_data": sigma_data, "sigma_data_override": sigma_data != checkpoint_training_sigma,
         "training_pixel_mask_gain": float(OmegaConf.select(cfg, "agent.denoiser.pixel_mask_gain", default=0.0)),
         "training_pixel_mae_weight": float(OmegaConf.select(cfg, "agent.denoiser.pixel_mae_weight", default=0.0)),
+        "training_diffusion_mse_weight": float(OmegaConf.select(cfg, "agent.denoiser.diffusion_mse_weight", default=1.0)),
         "dataset": str(dataset_path), "seed": seed, "batch_size": batch_size,
         "sampler_order": order, "conditioning_frames": num_cond,
         "episodes": len(episode_rows), "dataset_episodes": dataset.num_episodes,

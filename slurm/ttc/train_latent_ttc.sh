@@ -38,7 +38,7 @@ source .venv/bin/activate
 echo "--- Starting Latent TTC Head Training ---"
 python scripts/train_latent_ttc.py \
     --checkpoint diamond_highway_mcts.pt \
-    --dataset_path /blue/iruchkin/khek.do/diamond_dataset_1000 \
+    --dataset_path /orange/iruchkin/khek.do/diamond_dataset_1000 \
     --save_path checkpoints/best_latent_mse_ttc.pt \
     --loss_fn huber \
     --epochs 50 \
@@ -55,7 +55,7 @@ echo "--- Running Latent TTC Evaluation ---"
 python scripts/evaluate_diamond_ttc.py \
     --checkpoint diamond_highway_mcts.pt \
     --ttc-model checkpoints/best_latent_mse_ttc.pt \
-    --dataset_path /blue/iruchkin/khek.do/diamond_dataset_1000 \
+    --dataset_path /orange/iruchkin/khek.do/diamond_dataset_1000 \
     --mode latent \
     --episodes 10 \
     --context_len 20 \

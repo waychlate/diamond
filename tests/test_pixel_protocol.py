@@ -12,7 +12,7 @@ import torch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from prepare_pixel_data import prepare
+from prepare_pixel_data import kfold, prepare
 from evaluate_pixels import error_totals, transition_batches, with_mae
 from cross_validate_pixels import aggregate_if_complete, training_command
 from pixel_mask import build_mask_from_fullres
@@ -32,6 +32,7 @@ class PixelProtocolTests(unittest.TestCase):
         metrics = with_mae(error_totals(prediction, target, mask))
         self.assertGreater(metrics["unmasked_mae"], 0)
         self.assertEqual(metrics["masked_mae"], 0)
+        self.assertEqual(metrics["unmasked_mae_kinemamba_scale"], metrics["unmasked_mae"] / 2)
         empty = with_mae(error_totals(prediction, target, torch.zeros_like(mask)))
         self.assertIsNone(empty["masked_mae"])
         self.assertEqual(empty["empty_mask_transitions"], 1)
@@ -47,7 +48,12 @@ class PixelProtocolTests(unittest.TestCase):
         ep.end[4] = 1
         self.assertEqual([i for batch in transition_batches(ep, 4, 2) for i in batch[0]], [4, 5])
 
-    def test_preparation_preserves_holdout_and_reuses_files(self):
+    def test_kfold_matches_sklearn(self):
+        # Reference: sklearn KFold(5, shuffle=True, random_state=0).split(range(12)).
+        expected = [[4, 6, 11], [2, 8, 10], [1, 7], [3, 9], [0, 5]]
+        self.assertEqual([fold.tolist() for fold in kfold(12, 5, 0)], expected)
+
+    def test_preparation_pools_splits_like_kinemamba_and_reuses_files(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = root / "raw"
@@ -65,12 +71,18 @@ class PixelProtocolTests(unittest.TestCase):
                 prepare(source, output)
                 prepare(source, output)  # Repeated preparation is read-only.
             seen = []
+            folds = json.loads((output / "cv_folds.json").read_text())
+            self.assertEqual(folds["n_episodes"], 12)
+            # Pooled indices 10-11 are the test split, so CV validates on test episodes too.
+            self.assertEqual(folds["folds"][0]["val"], ["train/episode_0004_visuals.npz",
+                                                        "train/episode_0006_visuals.npz",
+                                                        "test/episode_0001_visuals.npz"])
             for fold in range(5):
                 path = output / "folds" / f"fold_{fold}"
                 split = json.loads((path / "split.json").read_text())
                 self.assertFalse(set(split["train_ids"]) & set(split["validation_ids"]))
-                self.assertEqual(len(split["train_ids"]), 8)
-                self.assertEqual(len(split["validation_ids"]), 2)
+                self.assertEqual(split["validation_episodes"], folds["folds"][fold]["val"])
+                self.assertEqual(len(split["train_ids"]) + len(split["validation_ids"]), 12)
                 seen.extend(split["validation_ids"])
                 for local in ("train", "test"):
                     ds = Dataset(path / local)
@@ -78,8 +90,8 @@ class PixelProtocolTests(unittest.TestCase):
                     self.assertEqual(len(ds.load_episode(0)), 6)
                     link = ds._get_episode_path(0)
                     self.assertTrue(link.is_symlink())
-                    self.assertTrue(link.resolve().is_relative_to(output / "train"))
-            self.assertEqual(sorted(seen), list(range(10)))
+                    self.assertTrue(link.resolve().is_relative_to(output))
+            self.assertEqual(sorted(seen), list(range(12)))
             holdout = Dataset(output / "test")
             holdout.load_from_default_path()
             self.assertEqual(holdout.num_episodes, 2)
@@ -91,6 +103,7 @@ class PixelProtocolTests(unittest.TestCase):
         self.assertIn("initialization.path_to_ckpt=null", command)
         self.assertIn("agent.denoiser.sigma_data=0.15", command)
         self.assertIn("training.num_final_epochs=50", command)
+        self.assertIn("agent.denoiser.inner_model.num_steps_conditioning=20", command)
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             aggregate_if_complete(root)
@@ -99,6 +112,8 @@ class PixelProtocolTests(unittest.TestCase):
                 path = root / f"fold_{fold}" / "pixel_eval"
                 path.mkdir(parents=True)
                 row = {"unmasked_mae": fold + 1, "masked_mae": (fold + 1) / 2,
+                       "unmasked_mae_kinemamba_scale": (fold + 1) / 2,
+                       "masked_mae_kinemamba_scale": (fold + 1) / 4,
                        "absolute_error": fold + 1, "pixel_channels": 1,
                        "masked_absolute_error": (fold + 1) / 2, "mask_weight_channels": 1}
                 (path / "summary.json").write_text(json.dumps(row))

@@ -7,6 +7,8 @@ denoiser:
   # Optional auxiliary pixel MAE; zero weight preserves the baseline diffusion loss.
   pixel_mask_gain: 0.0
   pixel_mae_weight: 0.0
+  # 0 (with pixel_mae_weight > 0) trains on the vehicle-weighted pixel MAE alone.
+  diffusion_mse_weight: 1.0
   inner_model:
     _target_: models.diffusion.InnerModelConfig
     img_channels: 3
