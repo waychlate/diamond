@@ -40,3 +40,51 @@ Both models were evaluated on the same 360 test episodes, so differences are pai
 - `viz/cv_vehicle_weighted_pixel_200steps/fold_0/pixel_eval/`
 
 Each folder contains `summary.json`, `episodes.csv`, `transitions.csv` and `example_00.png`–`example_05.png`.
+
+## Model cost — vehicle-weighted, fold 0, epoch 50
+
+Checkpoint: `cv_vehicle_weighted_pixel_200steps/fold_0/checkpoints/agent_versions/agent_epoch_00050.pt`, the second-to-last saved version of the old-protocol run. It uses 4 conditioning frames (`cond_channels` 256), not the 20 of the parity protocol.
+
+Measured with `scripts/model_cost.py`: batch size 1, random 48×320 input, Euler sampler with 3 denoising steps, 20 warmup calls and then 200 timed calls. Latency covers one full next-frame prediction (all 3 denoiser passes).
+
+| component            | parameters | used for next-frame pixels |
+| -------------------- | ---------- | -------------------------- |
+| denoiser (U-Net)     | 4,406,019 (16.8 MB fp32) | yes          |
+| reward/end model     | 17,435,328 | no                         |
+| actor-critic         | 8,997,318  | no                         |
+| total in checkpoint  | 30,838,665 |                            |
+
+| metric (RTX 4070 Laptop GPU) | value    |
+| ---------------------------- | -------- |
+| latency, mean                | 33.9 ms  |
+| latency, median              | 31.4 ms  |
+| latency, p95                 | 47.4 ms  |
+| peak GPU memory              | 197 MB   |
+
+Notes:
+
+- Parameters are counted as `sum(p.numel())` and the size as params × 4 bytes, the same as KineMamba's `check_mamba_size.py`. That script counts only the Mamba2 dynamics core. For a like-for-like number, KineMamba's count should include its encoder, decoder and TTC head, because DIAMOND's U-Net does all of that work.
+- Compare KineMamba against the denoiser's 4.4M parameters. The reward/end model and the actor-critic are DIAMOND's RL parts and play no part in predicting pixels. The TTC head isn't in this checkpoint, so it isn't counted here.
+- The latency was measured on a laptop GPU. For the paper, rerun on the same GPU as KineMamba's timing.
+- The 20-frame parity model only widens `conv_in` and the action embedding, so its parameter count barely changes. Measure its latency separately once its checkpoint exists.
+
+## Parameters used for the next frame: DIAMOND vs KineMamba
+
+These are the parameters that run when predicting the next frame and its TTC. They use KineMamba's labels from `check_sizes.py`, and MB is params × 4 bytes (fp32).
+
+| part          | DIAMOND                   | KineMamba                  |
+| ------------- | ------------------------- | -------------------------- |
+| Encoder       | 1,236,672 (4.7 MB)        | 8,124,672 (31.0 MB)        |
+| World_Model   | 3,169,347 (12.1 MB)       | 65,629,539 (250.4 MB)      |
+| TTC_Predictor | 492,545 (1.9 MB)          | 295,425 (1.1 MB)           |
+| **Total**     | **4,898,564 (18.7 MB)**   | **74,049,636 (282.5 MB)**  |
+
+How DIAMOND's U-Net denoiser maps onto the labels:
+
+- **Encoder:** `conv_in`, the down blocks and the downsamples. Its input is the context frames plus the noisy target, stacked as channels.
+- **World_Model:** the action and noise conditioning, the bottleneck blocks, the up blocks with skip connections, and the output conv. It plays the role of KineMamba's dynamics plus decoder. Unlike KineMamba, DIAMOND has no separate latent dynamics module, and the action conditioning also reaches the down blocks.
+- **TTC_Predictor:** `LatentTTCHead` without the LSTM (hidden 128, 4×4 pool), as planned for the parity TTC head. It isn't trained yet, so the count comes from the architecture. The old LSTM version had 1,345,409 parameters.
+
+The denoiser counts come from the 4-frame epoch-50 checkpoint. The 20-frame model has a wider `conv_in` and `cond_channels` 240 instead of 256, so both parts will change slightly. Rerun the script on its checkpoint. KineMamba's counts are his `check_sizes.py` output, and they match a hand count from his source.
+
+The reward/end model and the actor-critic are left out: neither is used to predict pixels, and the actor-critic is never trained (`start_after_epochs: 999999`).

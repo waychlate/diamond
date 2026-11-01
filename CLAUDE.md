@@ -23,6 +23,8 @@ Match KineMamba wherever a setting means the same thing in both models:
 
 Some settings depend on the architecture: epochs, batch size, learning rate, optimizer, context handling. Record those instead of matching them, together with training wall time, GPU, parameter count, inference latency and peak memory.
 
+Hardware: KineMamba trains on the `hpg-b200` and `hpg-turin` partitions. Training wall time depends on the GPU, so record which one each run used. The headline latency comparison will run on a Jetson Orin Nano, so GPU class doesn't need to match for training. If `hpg-b200` is faster for DIAMOND, using it is fine.
+
 When a change could affect fairness and these rules don't settle it, ask the user.
 
 ## Where things are

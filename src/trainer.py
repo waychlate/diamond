@@ -1,4 +1,5 @@
 from functools import partial
+import json
 from pathlib import Path
 import shutil
 import time
@@ -252,7 +253,9 @@ class Trainer(StateDictMixin):
                 to_log += self.collect_test()
 
             if should_test and not self._is_model_free:
-                to_log += self.test_agent()
+                test_logs = self.test_agent()
+                to_log += test_logs
+                self.save_best_agent(test_logs)
 
             # Logging
             to_log.append({"duration": (time.time() - start_time) / 3600})
@@ -396,6 +399,24 @@ class Trainer(StateDictMixin):
         return to_log
 
     @torch.no_grad()
+    def save_best_agent(self, test_logs: Logs) -> None:
+        """Keep checkpoints/best.pt: the epoch with the lowest mean denoiser test loss.
+
+        The test split is the CV fold's held-out data, as with KineMamba's best.pt (selected on its val fold).
+        The previous best survives a resume through best.json.
+        """
+        key = "denoiser/test/loss_denoising"
+        losses = [float(d[key]) for d in test_logs if key in d]
+        if not losses:
+            return
+        loss = sum(losses) / len(losses)
+        record = self._path_ckpt_dir / "best.json"
+        best = json.loads(record.read_text())["test_loss"] if record.is_file() else float("inf")
+        if loss < best:
+            save_with_backup(self.agent.state_dict(), self._path_ckpt_dir / "best.pt")
+            record.write_text(json.dumps({"epoch": self.epoch, "test_loss": loss}))
+            print(f"New best denoiser test loss {loss:.5f} at epoch {self.epoch}")
+
     def test_component(self, name: str) -> Logs:
         model = getattr(self.agent, name)
         data_loader = self._data_loader_test.get(name)

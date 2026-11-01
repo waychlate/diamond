@@ -33,10 +33,10 @@ python -u scripts/prepare_pixel_data.py \
 # For a new experiment, change --output instead.
 python -u scripts/cross_validate_pixels.py \
     --data /blue/iruchkin/khek.do/diamond_dataset_1000_200steps_kfold \
-    --output /blue/iruchkin/khek.do/diamond_pixel_results/cv_kinemamba_parity_smoke \
+    --output /blue/iruchkin/khek.do/diamond_pixel_results/cv_kinemamba_parity_gain40_smoke \
     --epochs 25 \
     --workers 8 \
-    --pixel-mask-gain 20 \
+    --pixel-mask-gain 40 \
     --pixel-mae-weight 1.0 \
     --diffusion-mse-weight 0 \
     --batch-size 32

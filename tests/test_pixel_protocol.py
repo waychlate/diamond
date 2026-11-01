@@ -104,6 +104,7 @@ class PixelProtocolTests(unittest.TestCase):
         self.assertIn("agent.denoiser.sigma_data=0.15", command)
         self.assertIn("training.num_final_epochs=50", command)
         self.assertIn("agent.denoiser.inner_model.num_steps_conditioning=20", command)
+        self.assertIn("rew_end_model.training.start_after_epochs=999999", command)
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             aggregate_if_complete(root)

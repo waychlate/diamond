@@ -21,6 +21,10 @@ def training_command(dataset, run, fold, *, resume=False, epochs=50, workers=8,
                f"agent.denoiser.pixel_mask_gain={pixel_mask_gain}",
                f"agent.denoiser.pixel_mae_weight={pixel_mae_weight}",
                f"agent.denoiser.diffusion_mse_weight={diffusion_mse_weight}",
+               # The reward/end model is not used for pixels or TTC and took half of each epoch.
+               "rew_end_model.training.start_after_epochs=999999",
+               # Keep a checkpoint every 5 epochs (the last 11 are kept), so the epoch curve survives.
+               "checkpointing.save_agent_every=5",
                f"common.seed={fold}", "common.devices=all", "wandb.mode=disabled",
                f"training.num_final_epochs={epochs}", f"training.num_workers_data_loaders={workers}",
                "training.cache_in_ram=False", "training.compile_wm=False"]
