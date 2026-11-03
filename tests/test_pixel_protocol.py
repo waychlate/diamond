@@ -13,6 +13,7 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from prepare_pixel_data import kfold, prepare
+import torch.nn.functional as F
 from evaluate_pixels import error_totals, transition_batches, with_mae
 from cross_validate_pixels import aggregate_if_complete, training_command
 from pixel_mask import build_mask_from_fullres
@@ -97,6 +98,33 @@ class PixelProtocolTests(unittest.TestCase):
             self.assertEqual(holdout.num_episodes, 2)
             with self.assertRaises(ValueError):
                 prepare(source, output, seed=1)
+
+    def test_no_crop_resizes_the_whole_frame_like_kinemamba(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            visuals = np.random.RandomState(0).randint(0, 256, (7, 150, 600, 3), dtype=np.uint8)
+            for split, count in (("train", 10), ("test", 2)):
+                (root / "raw" / split).mkdir(parents=True)
+                for i in range(count):
+                    name = root / "raw" / split / f"episode_{i:04d}"
+                    np.savez_compressed(str(name) + "_visuals.npz", visuals=visuals)
+                    with Path(str(name) + "_data.csv").open("w") as handle:
+                        writer = csv.writer(handle)
+                        writer.writerow(["action", "reward", "done", "crashed"])
+                        writer.writerows([[0, 0, False, 0]] * 7)
+            with contextlib.redirect_stdout(io.StringIO()):
+                prepare(root / "raw", root / "full", crop=False)
+                prepare(root / "raw", root / "cropped")
+            # KineMamba's resize_chw, then x / 127.5 - 1 (twice its x / 255 - 0.5).
+            chw = torch.from_numpy(visuals[0]).permute(2, 0, 1)[None].float()
+            expected = F.interpolate(chw, size=(48, 320), mode="bicubic", align_corners=False,
+                                     antialias=True).round().clamp(0, 255)[0] / 127.5 - 1
+            for name, same in (("full", True), ("cropped", False)):
+                ds = Dataset(root / name / "folds" / "fold_0" / "train")
+                ds.load_from_default_path()
+                obs = ds.load_episode(0).obs[0]
+                self.assertEqual(torch.allclose(obs, expected, atol=1e-6), same)
+            self.assertFalse((root / "full" / "manifest.json").read_text() == (root / "cropped" / "manifest.json").read_text())
 
     def test_cv_starts_fresh_and_aggregates_all_folds(self):
         command = training_command(Path("/data"), Path("/run"), 2)

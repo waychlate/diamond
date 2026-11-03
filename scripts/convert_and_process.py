@@ -14,7 +14,7 @@ sys.path.append(str(Path(__file__).resolve().parent.parent / "src"))
 from data.episode import Episode
 from data.dataset import Dataset
 
-def convert_data(src_dir, dst_dir):
+def convert_data(src_dir, dst_dir, crop=True):
     src_dir = Path(src_dir)
     dst_dir = Path(dst_dir)
     dst_dir.mkdir(parents=True, exist_ok=True)
@@ -68,12 +68,20 @@ def convert_data(src_dir, dst_dir):
                 continue
 
             # --- Image Processing (Crop, Resize, Normalize & Permute) ---
-            # 1. Convert numpy visuals to float PyTorch tensor in [0.0, 1.0] and shape (T, C, H, W)
-            frames = torch.from_numpy(visuals).float().div(255.0).permute(0, 3, 1, 2)
-            # Crop top=60, left=0, height=90, width=600 -> [:, :, 60:150, 0:600]
-            cropped = frames[:, :, 60:150, 0:600]
-            # Resize to (48, 320) and shift range from [0, 1] to [-1, 1]
-            obs_all = F.interpolate(cropped, size=(48, 320), mode="bilinear", align_corners=False).mul(2.0).sub(1.0)
+            if crop:
+                # 1. Convert numpy visuals to float PyTorch tensor in [0.0, 1.0] and shape (T, C, H, W)
+                frames = torch.from_numpy(visuals).float().div(255.0).permute(0, 3, 1, 2)
+                # Crop top=60, left=0, height=90, width=600 -> [:, :, 60:150, 0:600]
+                cropped = frames[:, :, 60:150, 0:600]
+                # Resize to (48, 320) and shift range from [0, 1] to [-1, 1]
+                obs_all = F.interpolate(cropped, size=(48, 320), mode="bilinear", align_corners=False).mul(2.0).sub(1.0)
+            else:
+                # KineMamba's loader (src/utils.py resize_chw): the whole frame, bicubic with antialiasing,
+                # rounded to uint8. Kept as uint8 because Episode.save truncates floats with .byte(), which would
+                # shift some pixels down a level; the loader maps uint8 to x/255*2 - 1, twice KineMamba's x/255 - 0.5.
+                frames = torch.from_numpy(visuals).permute(0, 3, 1, 2).float()
+                resized = F.interpolate(frames, size=(48, 320), mode="bicubic", align_corners=False, antialias=True)
+                obs_all = resized.round().clamp(0, 255).to(torch.uint8)
 
             # --- Construct DIAMOND Episode ---
             # 1. Observations: first T-1 processed frames (shape: T-1, C, H, W)

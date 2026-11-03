@@ -13,13 +13,17 @@ DIAMOND is the reference point, not the product. A change here earns its place b
 Match KineMamba wherever a setting means the same thing in both models:
 
 - **Data:** the shared 200-step highway dataset (`dataset_episodes_1000_200steps`).
+- **Images:** the whole 150×600 frame resized to 48×320 (bicubic, antialiased, rounded to uint8) as in KineMamba's loader, via `prepare_pixel_data.py --no-crop`. The older crop (rows 60–150, bilinear) is the default only so the pretrained-checkpoint evaluation keeps working. The two parity smoke runs used the crop, so their pixel numbers are not comparable with KineMamba's.
 - **Folds:** 5-fold CV from KineMamba's `src/make_cv_folds.py` (seed 0, sklearn `KFold` over the train and test episodes pooled). Both models read the same fold list.
 - **Vehicle mask:** `src/vehicle_mask.py` is a verbatim copy of KineMamba's `src/mask_utils.py` at commit 0c7566d. Keep it identical to the original.
-- **Vehicle weighting:** per-pixel weights `1 + gain · mask`, with gain 20.
+- **Vehicle weighting:** per-pixel weights `1 + gain · mask`, with gain 40 (KineMamba uses a flat 40, confirmed by its author). The earlier gain-20 smoke run is a side comparison only.
 - **Context:** 20 frames. DIAMOND conditions on all 20 (`num_steps_conditioning: 20`, with `cond_channels: 240` so the action embedding divides evenly). Both models are scored on targets from frame 20 onward.
 - **Training loss:** the vehicle-weighted pixel MAE is the only loss, and TTC is trained with MAE too, as in KineMamba.
 - **Headline metric:** pixel MAE, both unmasked and masked (see `CONTEXT.md`), on next-frame prediction, with TTC MAE alongside.
 - **Pixel scale:** KineMamba normalizes pixels to [-0.5, 0.5] (`x/255 - 0.5`), while DIAMOND uses [-1, 1]. The MAE formulas are the same, so the same image error gives DIAMOND an MAE twice as large. Halve DIAMOND's pixel MAE before putting it next to KineMamba's.
+- **Unmasked means unweighted:** the unmasked pixel MAE is the plain MAE over all pixels, not the gain-weighted training loss. At gain 40 the weighted loss reads about 23% higher than the plain MAE on the same predictions.
+- **Aggregation:** pool before dividing (sum of absolute errors over sum of pixels or mask weights), not a mean of per-batch ratios.
+- **Checkpoint selection:** both models keep a `best.pt` chosen on the held-out fold that is also reported (DIAMOND by mean denoiser test loss, KineMamba by validation pixel+TTC loss). Say so when reporting best-epoch numbers.
 
 Some settings depend on the architecture: epochs, batch size, learning rate, optimizer, context handling. Record those instead of matching them, together with training wall time, GPU, parameter count, inference latency and peak memory.
 
@@ -45,5 +49,5 @@ When a change could affect fairness and these rules don't settle it, ask the use
 
 - **Group quota:** the `iruchkin` group's `/blue` quota (5 TB) fills up from other users' jobs. When it's full, jobs die with `Disk quota exceeded`, `PytorchStreamWriter failed writing file`, or a cut-off `object address : 0x…` dump with no traceback. Check `blue_quota` first.
 - **Existing fold directory:** a fold whose output directory already exists stops with `FileExistsError`. Delete the dead fold directory, or pass `--resume` to continue from its checkpoint.
-- **Resources:** the CV training job runs with 8 CPUs, 8 workers and 32 GB. Fold 0 peaked at about 37 GB and took about 1d 18h of the 48h limit.
+- **Resources:** the CV training job runs with 8 CPUs, 8 workers and 64 GB. Fold 0 peaked at about 37 GB and took about 1d 18h of the 48h limit.
 - **Reading logs:** tqdm writes carriage returns, so read `.err` files with `tr '\r' '\n' < file | tail`.

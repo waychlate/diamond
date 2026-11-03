@@ -63,11 +63,13 @@ def make_subset(episodes, destination):
     subset.save_to_default_path()
 
 
-def prepare(source, output, seed=0):
+def prepare(source, output, seed=0, crop=True):
     source, output = Path(source).resolve(), Path(output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     manifest = {"version": 2, "source": str(source), "seed": seed,
                 "raw": source_manifest(source)}
+    if not crop:
+        manifest["crop"] = False  # Absent for cropped data, so older prepared directories stay valid.
     # An array job and the meeting evaluation can safely request the same preparation.
     with output.with_name(output.name + ".lock").open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -78,7 +80,7 @@ def prepare(source, output, seed=0):
             return output
         with tempfile.TemporaryDirectory(prefix=output.name + ".", dir=output.parent) as tmp:
             stage = Path(tmp) / "data"
-            convert_data(source, stage)
+            convert_data(source, stage, crop=crop)
             datasets = {}
             for split in ("train", "test"):
                 ds = Dataset(stage / split)
@@ -124,5 +126,7 @@ if __name__ == "__main__":
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--no-crop", action="store_true",
+                        help="Resize the whole frame like KineMamba instead of cropping rows 60-150 first")
     args = parser.parse_args()
-    print(prepare(args.source, args.output, args.seed))
+    print(prepare(args.source, args.output, args.seed, crop=not args.no_crop))

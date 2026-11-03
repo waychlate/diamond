@@ -1,6 +1,9 @@
 import os
 import sys
 import argparse
+import csv
+import json
+import numpy as np
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -28,19 +31,22 @@ def compute_ttc_targets_for_batch(
     num_cond: int,
     dt: float = 0.1,
     max_ttc: Optional[float] = None,
+    offset: int = 0,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Computes ground truth TTC targets for each step in a batch after conditioning.
     Uses continuous obs_ttc from batch.info if present, otherwise falls back to step-counting.
     If max_ttc is None or <= 0, targets are left uncapped.
+    offset=0 targets the last context frame; offset=1 targets the next frame, as KineMamba does.
     """
+    assert offset in (0, 1), "the segment only holds one frame beyond the last window"
     b, seq_len = batch.end.shape
     num_targets = seq_len - num_cond
     device = batch.end.device
     
     fallback_val = max_ttc if (max_ttc is not None and max_ttc > 0) else 15.0
     targets = torch.full((b, num_targets, 1), fallback_val, dtype=torch.float32, device=device)
-    valid_masks = batch.mask_padding[:, num_cond - 1 : num_cond - 1 + num_targets].clone()
+    valid_masks = batch.mask_padding[:, num_cond - 1 + offset : num_cond - 1 + offset + num_targets].clone()
     
     has_obs_ttc_list = (
         hasattr(batch, "info")
@@ -54,7 +60,7 @@ def compute_ttc_targets_for_batch(
     if has_obs_ttc_list:
         raw_ttc = torch.stack([s_info["obs_ttc"] for s_info in batch.info]).to(device).float()  # (B, seq_len)
         for step in range(num_targets):
-            curr_idx = num_cond + step - 1
+            curr_idx = num_cond + step - 1 + offset
             val = torch.clamp(raw_ttc[:, curr_idx], min=0.0)
             if max_ttc is not None and max_ttc > 0:
                 val = torch.clamp(val, max=max_ttc)
@@ -62,7 +68,7 @@ def compute_ttc_targets_for_batch(
     elif has_obs_ttc_dict:
         raw_ttc = batch.info["obs_ttc"].to(device).float()  # (B, seq_len)
         for step in range(num_targets):
-            curr_idx = num_cond + step - 1
+            curr_idx = num_cond + step - 1 + offset
             val = torch.clamp(raw_ttc[:, curr_idx], min=0.0)
             if max_ttc is not None and max_ttc > 0:
                 val = torch.clamp(val, max=max_ttc)
@@ -76,7 +82,7 @@ def compute_ttc_targets_for_batch(
             crash_idx = crash_indices[0].item() if has_crash else -1
             
             for step in range(num_targets):
-                curr_idx = num_cond + step - 1
+                curr_idx = num_cond + step - 1 + offset
                 if has_crash and curr_idx <= crash_idx:
                     ttc_seconds = (crash_idx - curr_idx) * dt
                     targets[i, step, 0] = min(ttc_seconds, fallback_val)
@@ -109,6 +115,45 @@ def extract_latents_for_sequence(
     flat_z = agent.denoiser.extract_latent(flat_obs, flat_act)
     _, c_mid, h_mid, w_mid = flat_z.shape
     return flat_z.reshape(b, context_len, c_mid, h_mid, w_mid)
+
+
+@torch.no_grad()
+def evaluate_test_split(agent, ttc_head, dataset, num_cond, offset, output, info, device, chunk=64):
+    """TTC MAE over every window of every episode in a split: one prediction per target frame from frame num_cond on."""
+    ttc_head.eval()
+    output = Path(output)
+    output.mkdir(parents=True, exist_ok=False)
+    rows, total, count = [], 0.0, 0
+    for episode_id in tqdm(range(dataset.num_episodes), desc="TTC test episodes"):
+        episode = dataset.load_episode(episode_id)
+        ttc = episode.info["obs_ttc"].float()
+        obs, act = episode.obs.to(device), episode.act.to(device)
+        # Window t holds frames t..t+num_cond-1; its target is the TTC `offset` frames after the last one.
+        starts = [t for t in range(len(obs) - num_cond + 1) if t + num_cond - 1 + offset < len(ttc)]
+        errors = []
+        for i in range(0, len(starts), chunk):
+            part = starts[i:i + chunk]
+            windows = torch.stack([obs[t:t + num_cond] for t in part])
+            actions = torch.stack([act[t:t + num_cond] for t in part])
+            pred, _ = ttc_head(agent.denoiser.extract_latent(windows, actions))
+            target = torch.stack([ttc[t + num_cond - 1 + offset] for t in part]).to(device).clamp(min=0.0)
+            errors.append((pred.squeeze(-1) - target).abs().cpu())
+        errors = torch.cat(errors)
+        rows.append({"episode_id": episode_id, "transitions": len(errors), "ttc_mae": errors.mean().item()})
+        total += errors.sum().item()
+        count += len(errors)
+    with (output / "episodes.csv").open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["episode_id", "transitions", "ttc_mae"])
+        writer.writeheader()
+        writer.writerows(rows)
+    per_episode = np.array([r["ttc_mae"] for r in rows])
+    summary = {**info, "target_offset": offset, "conditioning_frames": num_cond, "episodes": len(rows),
+               "transitions": count, "ttc_mae": total / count, "ttc_mae_episode_mean": float(per_episode.mean()),
+               "ttc_mae_episode_std": float(per_episode.std(ddof=1)), "unit": "seconds",
+               "note": "Targets start at frame num_cond. obs_ttc has no entry for the final observation, so the last frame is not scored."}
+    (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+    print(f"TTC MAE over {count:,} transitions: {summary['ttc_mae']:.4f}s")
+    return summary
 
 
 def calculate_dataset_max_ttc(dataset: Dataset, dt: float = 0.1, fallback_max: float = 5.0) -> float:
@@ -150,9 +195,16 @@ def train_latent_ttc(args):
     print(f"Training Latent TTC Predictor on device: {device}")
     
     # 1. Load DIAMOND Config & Backbone Agent
-    config_dir = "../config"
-    with initialize(version_base="1.3", config_path=config_dir):
-        cfg = compose(config_name="trainer", overrides=["env=highway"])
+    if args.config:
+        # The run's own config carries its context length, cond_channels and sigma_data.
+        cfg = OmegaConf.load(args.config)
+        OmegaConf.resolve(cfg)
+    else:
+        config_dir = "../config"
+        with initialize(version_base="1.3", config_path=config_dir):
+            cfg = compose(config_name="trainer", overrides=["env=highway"])
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
         
     num_actions = cfg.env.num_actions if "num_actions" in cfg.env else 5
     print("Instantiating DIAMOND Agent...")
@@ -199,6 +251,10 @@ def train_latent_ttc(args):
             f"Please verify 'info.pt' exists in {train_path} or run scripts/convert_and_process.py first."
         )
     
+    stats = torch.cat([train_dataset.load_episode(i).info["obs_ttc"].float() for i in range(min(100, train_dataset.num_episodes))])
+    print(f"obs_ttc over {min(100, train_dataset.num_episodes)} train episodes: min={stats.min():.3f} max={stats.max():.3f} "
+          f"mean={stats.mean():.3f} share==5.0: {(stats == 5.0).float().mean():.3%}")
+
     # Determine max TTC cap from dataset
     if args.max_ttc is not None and args.max_ttc > 0:
         max_ttc = args.max_ttc
@@ -263,7 +319,7 @@ def train_latent_ttc(args):
             act = batch.act.to(device)  # (B, seq_len)
             
             # Ground truth targets
-            targets, masks = compute_ttc_targets_for_batch(batch, num_cond=num_cond, dt=args.dt, max_ttc=max_ttc)
+            targets, masks = compute_ttc_targets_for_batch(batch, num_cond=num_cond, dt=args.dt, max_ttc=max_ttc, offset=args.target_offset)
             targets = targets.to(device)
             masks = masks.to(device)
             
@@ -275,7 +331,9 @@ def train_latent_ttc(args):
             pred_ttc, _ = ttc_head(latents_seq)  # (B, context_len, 1)
             
             # Compute loss only on valid non-padded steps
-            if args.loss_fn == "mse":
+            if args.loss_fn == "l1":
+                loss = F.l1_loss(pred_ttc[masks], targets[masks])
+            elif args.loss_fn == "mse":
                 loss = F.mse_loss(pred_ttc[masks], targets[masks])
             elif args.loss_fn in ("huber", "smooth_l1"):
                 loss = F.smooth_l1_loss(pred_ttc[masks], targets[masks])
@@ -310,7 +368,7 @@ def train_latent_ttc(args):
                 obs = batch.obs.to(device)
                 act = batch.act.to(device)
                 
-                targets, masks = compute_ttc_targets_for_batch(batch, num_cond=num_cond, dt=args.dt, max_ttc=max_ttc)
+                targets, masks = compute_ttc_targets_for_batch(batch, num_cond=num_cond, dt=args.dt, max_ttc=max_ttc, offset=args.target_offset)
                 targets = targets.to(device)
                 masks = masks.to(device)
                 
@@ -371,13 +429,23 @@ def train_latent_ttc(args):
 
     print(f"\nTraining Complete. Best 20-Frame Context Validation MAE: {best_val_mae:.4f}s. Saved to: {args.save_path}")
 
+    if args.eval_output:
+        if ttc_head.use_temporal_lstm:
+            raise ValueError("The full test-split evaluation scores each window on its own, so it needs --no_lstm")
+        best = torch.load(args.save_path, map_location=device, weights_only=False)
+        ttc_head.load_state_dict(best["model_state_dict"])
+        evaluate_test_split(agent, ttc_head, val_dataset, num_cond, args.target_offset, args.eval_output,
+                            {"denoiser_checkpoint": str(args.checkpoint), "ttc_checkpoint": str(args.save_path),
+                             "dataset": str(test_path), "best_epoch": best["epoch"], "loss_fn": args.loss_fn,
+                             "seed": args.seed}, device)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train Latent TTC Head directly from DIAMOND's UNet features")
     parser.add_argument("--checkpoint", type=str, default="diamond_highway_mcts.pt", help="Path to pretrained DIAMOND model")
     parser.add_argument("--dataset_path", type=str, default="dataset_mcts", help="Path to processed DIAMOND dataset")
     parser.add_argument("--save_path", type=str, default="checkpoints/best_latent_ttc.pt", help="Output path for trained TTC weights")
-    parser.add_argument("--loss_fn", type=str, default="mse", choices=["mse", "huber", "smooth_l1"], help="Loss function for training TTC head (default: mse)")
+    parser.add_argument("--loss_fn", type=str, default="mse", choices=["mse", "huber", "smooth_l1", "l1"], help="Loss function for training TTC head (default: mse)")
     parser.add_argument("--epochs", type=int, default=50, help="Number of training epochs")
     parser.add_argument("--steps_per_epoch", type=int, default=100, help="Number of batches/steps per epoch (default: 100)")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
@@ -391,6 +459,10 @@ if __name__ == "__main__":
     parser.add_argument("--num_workers", type=int, default=0, help="DataLoader num workers (default: 0 for single-process memory safety)")
     parser.add_argument("--resume", action="store_true", default=True, help="Auto-resume from existing save_path checkpoint if found (default: True)")
     parser.add_argument("--device", type=str, default="cuda", help="Device (cuda or cpu)")
+    parser.add_argument("--config", type=str, default=None, help="trainer.yaml of the DIAMOND run (default: the repo's 4-frame config)")
+    parser.add_argument("--target_offset", type=int, default=0, choices=[0, 1], help="0: TTC of the last context frame; 1: TTC of the next frame (KineMamba)")
+    parser.add_argument("--eval_output", type=str, default=None, help="After training, score the whole test split into this new directory (needs --no_lstm)")
+    parser.add_argument("--seed", type=int, default=0)
     
     args = parser.parse_args()
     train_latent_ttc(args)
