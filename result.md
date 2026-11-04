@@ -137,3 +137,63 @@ Gain 20 ranged over 0.01179–0.01454 unmasked and 0.02544–0.03522 masked acro
 
 - Training wall time and GPU for both runs (`sacct -j <jobid> --format=Elapsed,MaxRSS`). From the log speeds, the gain-20 run took roughly 36 h, about half of each epoch going to the reward/end model.
 - Gain-40 epoch curve, TTC MAE, and the other four folds.
+
+### TTC head on the gain-40 smoke model (fold 0)
+
+A TTC head trained on the frozen `best.pt` of the gain-40 smoke run (cropped data, so like the pixel numbers it is DIAMOND-only evidence until the no-crop CV exists).
+
+- Setup: next-frame target (`obs_ttc` of the frame being predicted), L1 loss, no LSTM, 20 context frames, hidden 128, dropout 0.1, 20 epochs of 500 steps, batch 32, seed 0. Raw `obs_ttc` has no sentinel values (min 0.2 s, max 15 s), so the targets equal KineMamba's.
+- Eval: every target from frame 20 on, over the whole fold-0 test split. `obs_ttc` has no entry for the final observation, so that frame is not scored: 400 episodes × 179 = 71,600 transitions.
+
+| | value |
+| --- | --- |
+| TTC MAE | **0.790 s** |
+| per-episode mean ± std | 0.790 ± 0.427 s |
+| per-episode min / median / max | 0.311 / 0.671 / 3.724 s |
+| best epoch (random-batch validation) | 17 of 20 |
+
+For scale, the targets have median 1.8 s and mean 2.4 s, so a head that always predicted the median would miss by roughly 2 s. A few episodes are much harder than the rest (the worst scores 3.7 s). The best epoch was chosen on the held-out fold, as with `best.pt`. Parameters of this head: 492,545.
+
+### Against the earlier TTC heads
+
+The earlier heads (`models/best_latent_ttc.pt`, `models/best_latent_mse_ttc.pt`) store their own validation MAE:
+
+| TTC head | MAE (s) | parameters | how it was measured |
+| --- | --- | --- | --- |
+| earlier, `best_latent_ttc.pt` (Aug 29, epoch 44) | 0.775 | 1,345,409 (LSTM) | final step of the 20-frame window, random validation windows |
+| earlier, `best_latent_mse_ttc.pt` (Sep 26, epoch 50, MSE loss) | 0.855 (1.083 averaged over all window steps) | 1,345,409 (LSTM) | same |
+| new, gain-40 smoke (epoch 17) | 0.790 | 492,545 (no LSTM) | every target from frame 20, 71,600 transitions |
+
+The new head is within about 2% of the best earlier one and about 8% better than the MSE one, with 37% of the parameters and a harder target. The comparison is indicative only:
+
+- Targets differ: the earlier heads predict the TTC of the current frame, the new one the next frame's.
+- Backbones differ: the earlier heads sit on the pretrained 4-frame model, the new one on the 20-frame smoke model.
+- Data and protocol differ: the earlier numbers come from random validation windows on the old split, the new one from the whole fold-0 test split. All are best-epoch values chosen on their own validation data.
+- The earlier checkpoint from August does not record its loss function.
+
+## Parameters and size — gain-40 smoke model (`best.pt`, 20-frame context)
+
+Counted from the model definition with the run's settings (`num_steps_conditioning` 20, `cond_channels` 240, channels [64, 64, 64, 64]), not from the checkpoint file. Parameter counts do not depend on the trained values. Verify against `best.pt` with `scripts/model_cost.py` once it is synced. Layout and units follow KineMamba's `check_sizes.py` (size = params × 4 bytes, in MB).
+
+```
+Part of pipeline, param_count, size in MB
+Encoder: 1231552, 4.697998046875
+World_Model: 3071263, 11.715938568115234
+TTC_Predictor: 492545, 1.8789100646972656
+Total MB: 18.2928466796875
+```
+
+| | DIAMOND (this run) | KineMamba |
+| --- | --- | --- |
+| Encoder | 1,231,552 (4.70 MB) | 8,124,672 (30.99 MB) |
+| World_Model | 3,071,263 (11.72 MB) | 65,629,539 (250.36 MB) |
+| TTC_Predictor | 492,545 (1.88 MB) | 295,425 (1.13 MB) |
+| **Total** | **4,795,360 (18.29 MB)** | **74,049,636 (282.48 MB)** |
+
+KineMamba is about 15.4× larger.
+
+- Denoiser alone: 4,302,815 parameters (matches the training log: `4302815 parameters in denoiser`).
+- Encoder = `conv_in`, down blocks and downsamples; World_Model = conditioning, bottleneck, up blocks and output conv. The split is approximate, since DIAMOND has no separate dynamics module.
+- TTC_Predictor is the no-LSTM `LatentTTCHead` (hidden 128, 4×4 pool) used in the TTC run above.
+- The whole `best.pt` file also carries the reward/end model (17,435,328) and the actor-critic (8,997,318), neither used for prediction: 30,735,461 parameters in total.
+- Not yet measured: inference latency and peak memory (on the Jetson Orin Nano), and training wall time.

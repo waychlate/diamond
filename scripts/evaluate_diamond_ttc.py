@@ -117,24 +117,22 @@ def evaluate_diamond_ttc(
     if mode == "latent":
         print(f"Loading Latent TTC Head from {ttc_model_path}...")
         in_channels = cfg.agent.denoiser.inner_model.channels[-1] if hasattr(cfg.agent.denoiser.inner_model, "channels") else 64
-        use_lstm = True
         hidden_dim = 128
         
         if os.path.exists(ttc_model_path):
             ckpt = torch.load(ttc_model_path, map_location=device)
             if isinstance(ckpt, dict) and "config" in ckpt:
-                use_lstm = ckpt["config"].get("use_temporal_lstm", True)
                 hidden_dim = ckpt["config"].get("hidden_dim", 128)
                 if "max_ttc" in ckpt and max_ttc is None:
                     max_ttc = ckpt["max_ttc"]
             
-            ttc_predictor = LatentTTCHead(in_channels=in_channels, hidden_dim=hidden_dim, use_temporal_lstm=use_lstm).to(device).eval()
+            ttc_predictor = LatentTTCHead(in_channels=in_channels, hidden_dim=hidden_dim).to(device).eval()
             sd = ckpt["model_state_dict"] if isinstance(ckpt, dict) and "model_state_dict" in ckpt else ckpt
             ttc_predictor.load_state_dict(sd)
             max_ttc_str = f"{max_ttc:.2f}s" if (max_ttc is not None and max_ttc > 0) else "uncapped"
-            print(f"Latent TTC Head weights loaded successfully (use_lstm={use_lstm}, max_ttc={max_ttc_str}).")
+            print(f"Latent TTC Head weights loaded successfully (max_ttc={max_ttc_str}).")
         else:
-            ttc_predictor = LatentTTCHead(in_channels=in_channels, hidden_dim=hidden_dim, use_temporal_lstm=use_lstm).to(device).eval()
+            ttc_predictor = LatentTTCHead(in_channels=in_channels, hidden_dim=hidden_dim).to(device).eval()
             print(f"Warning: {ttc_model_path} not found. Proceeding with initial weights for evaluation structure.")
     else:
         try:

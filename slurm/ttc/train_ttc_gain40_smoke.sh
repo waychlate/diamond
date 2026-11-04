@@ -33,7 +33,6 @@ python -u scripts/train_latent_ttc.py \
     --eval_output "$R/ttc_head/eval" \
     --target_offset 1 \
     --loss_fn l1 \
-    --no_lstm \
     --epochs 20 \
     --steps_per_epoch 500 \
     --batch_size 32 \

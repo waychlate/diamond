@@ -12,7 +12,6 @@ class TTCHeadConfig:
     in_channels: int = 64
     hidden_dim: int = 128
     pool_size: Tuple[int, int] = (4, 4)
-    use_temporal_lstm: bool = False
     dropout: float = 0.1
 
 
@@ -27,14 +26,12 @@ class LatentTTCHead(nn.Module):
         in_channels: int = 64,
         hidden_dim: int = 128,
         pool_size: Tuple[int, int] = (4, 4),
-        use_temporal_lstm: bool = False,
         dropout: float = 0.1,
     ) -> None:
         super().__init__()
         self.in_channels = in_channels
         self.hidden_dim = hidden_dim
         self.pool_size = pool_size
-        self.use_temporal_lstm = use_temporal_lstm
 
         # Spatial feature reduction
         self.conv = nn.Sequential(
@@ -50,54 +47,31 @@ class LatentTTCHead(nn.Module):
         flat_dim = hidden_dim * pool_size[0] * pool_size[1]
         self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        if use_temporal_lstm:
-            self.lstm = nn.LSTM(flat_dim, hidden_dim, batch_first=True)
-            self.regressor = nn.Sequential(
-                nn.Linear(hidden_dim, hidden_dim // 2),
-                nn.SiLU(),
-                self.dropout,
-                nn.Linear(hidden_dim // 2, 1),
-            )
-        else:
-            self.regressor = nn.Sequential(
-                nn.Linear(flat_dim, hidden_dim),
-                nn.SiLU(),
-                self.dropout,
-                nn.Linear(hidden_dim, hidden_dim // 2),
-                nn.SiLU(),
-                nn.Linear(hidden_dim // 2, 1),
-            )
+        self.regressor = nn.Sequential(
+            nn.Linear(flat_dim, hidden_dim),
+            nn.SiLU(),
+            self.dropout,
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.SiLU(),
+            nn.Linear(hidden_dim // 2, 1),
+        )
 
     def forward(
         self,
         latents: Tensor,
         hx_cx: Optional[Tuple[Tensor, Tensor]] = None,
-    ) -> Tuple[Tensor, Optional[Tuple[Tensor, Tensor]]]:
+    ) -> Tuple[Tensor, None]:
         """
-        latents: (B, C, H, W) or (B, T, C, H, W)
-        returns: (B, 1) or (B, T, 1) continuous predicted TTC
+        latents: (B, C, H, W) or (B, T, C, H, W); each of the T latents is scored on its own.
+        returns: ((B, 1) or (B, T, 1) continuous predicted TTC, None)
+        hx_cx is unused and the second return value is always None; both only keep the old callers working.
         """
         if latents.ndim == 5:
             b, t, c, h, w = latents.shape
-            x = latents.reshape(b * t, c, h, w)
-            x = self.conv(x)
-            x = x.reshape(b, t, -1)
-            x = self.dropout(x)
-
-            if self.use_temporal_lstm:
-                out, hx_cx = self.lstm(x, hx_cx)
-                ttc = self.regressor(out)
-            else:
-                ttc = self.regressor(x)
-            return ttc, hx_cx
-
+            x = self.conv(latents.reshape(b * t, c, h, w)).reshape(b, t, -1)
+            return self.regressor(self.dropout(x)), None
         elif latents.ndim == 4:
-            x = self.conv(latents)
-            x = x.flatten(start_dim=1)
-            x = self.dropout(x)
-            ttc = self.regressor(x)
-            return ttc, None
-
+            x = self.conv(latents).flatten(start_dim=1)
+            return self.regressor(self.dropout(x)), None
         else:
             raise ValueError(f"Expected latents with 4 or 5 dimensions, got {latents.ndim}")
-

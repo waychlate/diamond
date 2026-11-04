@@ -275,7 +275,6 @@ def train_latent_ttc(args):
     ttc_head = LatentTTCHead(
         in_channels=in_channels,
         hidden_dim=args.hidden_dim,
-        use_temporal_lstm=not args.no_lstm,
         dropout=args.dropout
     ).to(device)
     
@@ -418,7 +417,6 @@ def train_latent_ttc(args):
                 "config": {
                     "in_channels": in_channels,
                     "hidden_dim": args.hidden_dim,
-                    "use_temporal_lstm": not args.no_lstm,
                     "context_len": args.context_len,
                     "dt": args.dt,
                     "loss_fn": args.loss_fn,
@@ -430,8 +428,6 @@ def train_latent_ttc(args):
     print(f"\nTraining Complete. Best 20-Frame Context Validation MAE: {best_val_mae:.4f}s. Saved to: {args.save_path}")
 
     if args.eval_output:
-        if ttc_head.use_temporal_lstm:
-            raise ValueError("The full test-split evaluation scores each window on its own, so it needs --no_lstm")
         best = torch.load(args.save_path, map_location=device, weights_only=False)
         ttc_head.load_state_dict(best["model_state_dict"])
         evaluate_test_split(agent, ttc_head, val_dataset, num_cond, args.target_offset, args.eval_output,
@@ -445,23 +441,22 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint", type=str, default="diamond_highway_mcts.pt", help="Path to pretrained DIAMOND model")
     parser.add_argument("--dataset_path", type=str, default="dataset_mcts", help="Path to processed DIAMOND dataset")
     parser.add_argument("--save_path", type=str, default="checkpoints/best_latent_ttc.pt", help="Output path for trained TTC weights")
-    parser.add_argument("--loss_fn", type=str, default="mse", choices=["mse", "huber", "smooth_l1", "l1"], help="Loss function for training TTC head (default: mse)")
-    parser.add_argument("--epochs", type=int, default=50, help="Number of training epochs")
-    parser.add_argument("--steps_per_epoch", type=int, default=100, help="Number of batches/steps per epoch (default: 100)")
+    parser.add_argument("--loss_fn", type=str, default="l1", choices=["mse", "huber", "smooth_l1", "l1"], help="Loss function for training TTC head (default: l1, as KineMamba)")
+    parser.add_argument("--epochs", type=int, default=20, help="Number of training epochs")
+    parser.add_argument("--steps_per_epoch", type=int, default=500, help="Number of batches/steps per epoch (default: 500)")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--hidden_dim", type=int, default=128, help="Hidden dimension for LatentTTCHead")
-    parser.add_argument("--context_len", type=int, default=20, help="Number of history frames / steps observed (default: 20)")
-    parser.add_argument("--no_lstm", action="store_true", help="Disable temporal LSTM (defaults to using LSTM for 20 frames)")
+    parser.add_argument("--context_len", type=int, default=20, help="Sliding windows scored per training segment; each window is the model's own num_steps_conditioning frames (default: 20)")
     parser.add_argument("--dt", type=float, default=0.1, help="Delta time per step in seconds (default: 0.1s for 10Hz)")
     parser.add_argument("--max_ttc", type=float, default=None, help="Max TTC cap in seconds (default: None for uncapped)")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate")
-    parser.add_argument("--num_workers", type=int, default=0, help="DataLoader num workers (default: 0 for single-process memory safety)")
-    parser.add_argument("--resume", action="store_true", default=True, help="Auto-resume from existing save_path checkpoint if found (default: True)")
+    parser.add_argument("--num_workers", type=int, default=4, help="DataLoader num workers (default: 4; use 0 if memory is tight)")
+    parser.add_argument("--resume", action="store_true", default=True, help="Always on: if save_path already exists, training resumes from it instead of starting fresh. Use a new save_path for a new run.")
     parser.add_argument("--device", type=str, default="cuda", help="Device (cuda or cpu)")
     parser.add_argument("--config", type=str, default=None, help="trainer.yaml of the DIAMOND run (default: the repo's 4-frame config)")
-    parser.add_argument("--target_offset", type=int, default=0, choices=[0, 1], help="0: TTC of the last context frame; 1: TTC of the next frame (KineMamba)")
-    parser.add_argument("--eval_output", type=str, default=None, help="After training, score the whole test split into this new directory (needs --no_lstm)")
+    parser.add_argument("--target_offset", type=int, default=1, choices=[0, 1], help="1: TTC of the next frame, as KineMamba (default); 0: TTC of the last context frame")
+    parser.add_argument("--eval_output", type=str, default=None, help="After training, score the whole test split into this new directory ")
     parser.add_argument("--seed", type=int, default=0)
     
     args = parser.parse_args()
