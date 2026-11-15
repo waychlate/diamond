@@ -35,6 +35,7 @@ def tiny_denoiser(pixel_weight, mse_weight=1.0):
                                   pixel_mask_gain=20.0, pixel_mae_weight=pixel_weight,
                                   diffusion_mse_weight=mse_weight)
     denoiser.inner_model = ConstantModel()
+    denoiser.ttc_head = None
     denoiser.sample_sigma_training = lambda n, device: torch.ones(n, device=device)
     return denoiser
 

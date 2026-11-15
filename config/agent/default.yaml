@@ -9,6 +9,10 @@ denoiser:
   pixel_mae_weight: 0.0
   # 0 (with pixel_mae_weight > 0) trains on the vehicle-weighted pixel MAE alone.
   diffusion_mse_weight: 1.0
+  # > 0 trains a TTC head on the bottleneck jointly with the denoiser (see denoiser.py).
+  ttc_loss_weight: 0.0
+  ttc_hidden_dim: 256
+  ttc_dropout: 0.2
   inner_model:
     _target_: models.diffusion.InnerModelConfig
     img_channels: 3
@@ -17,6 +21,9 @@ denoiser:
     depths: [2,2,2,2]
     channels: [64,64,64,64]
     attn_depths: [0,0,0,0]
+    # > 0 adds a KineMamba-style dense bottleneck (flatten -> d -> flatten, residual); 1024 adds 31.5M parameters.
+    dense_bottleneck_dim: 0
+    img_size: ${env.train.size}
 
 rew_end_model:
   _target_: models.rew_end_model.RewEndModelConfig

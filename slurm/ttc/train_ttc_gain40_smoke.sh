@@ -37,8 +37,8 @@ python -u scripts/train_latent_ttc.py \
     --steps_per_epoch 500 \
     --batch_size 32 \
     --lr 1e-4 \
-    --hidden_dim 128 \
-    --dropout 0.1 \
+    --hidden_dim 256 \
+    --dropout 0.2 \
     --num_workers 4 \
     --seed 0 \
     --device cuda

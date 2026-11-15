@@ -398,25 +398,35 @@ class Trainer(StateDictMixin):
         to_log = [{f"{name}/train/{k}": v for k, v in d.items()} for d in to_log]
         return to_log
 
-    @torch.no_grad()
     def save_best_agent(self, test_logs: Logs) -> None:
-        """Keep checkpoints/best.pt: the epoch with the lowest mean denoiser test loss.
+        """Keep checkpoints/best.pt: the epoch with the lowest held-out denoiser metric.
 
+        The metric is the mean test loss, or, when a TTC head is trained jointly, weighted pixel MAE + TTC MAE
+        with weight 1 whatever ttc_loss_weight is, as KineMamba selects its best.pt (val pixel_loss + ttc_loss).
         The test split is the CV fold's held-out data, as with KineMamba's best.pt (selected on its val fold).
         The previous best survives a resume through best.json.
         """
-        key = "denoiser/test/loss_denoising"
-        losses = [float(d[key]) for d in test_logs if key in d]
-        if not losses:
+        def mean(key):
+            values = [float(d[f"denoiser/test/{key}"]) for d in test_logs if f"denoiser/test/{key}" in d]
+            return sum(values) / len(values) if values else None
+
+        pixel, ttc = mean("loss_weighted_pixel_mae"), mean("loss_ttc")
+        if pixel is not None and ttc is not None:
+            metric, loss = "weighted_pixel_mae + ttc_mae", pixel + ttc
+        else:
+            metric, loss = "loss_denoising", mean("loss_denoising")
+        if loss is None:
             return
-        loss = sum(losses) / len(losses)
         record = self._path_ckpt_dir / "best.json"
-        best = json.loads(record.read_text())["test_loss"] if record.is_file() else float("inf")
+        previous = json.loads(record.read_text()) if record.is_file() else {}
+        # A record written under another metric cannot be compared, so the first epoch under this one wins.
+        best = previous.get("test_loss", float("inf")) if previous.get("metric", "loss_denoising") == metric else float("inf")
         if loss < best:
             save_with_backup(self.agent.state_dict(), self._path_ckpt_dir / "best.pt")
-            record.write_text(json.dumps({"epoch": self.epoch, "test_loss": loss}))
-            print(f"New best denoiser test loss {loss:.5f} at epoch {self.epoch}")
+            record.write_text(json.dumps({"epoch": self.epoch, "metric": metric, "test_loss": loss}))
+            print(f"New best denoiser test {metric} {loss:.5f} at epoch {self.epoch}")
 
+    @torch.no_grad()
     def test_component(self, name: str) -> Logs:
         model = getattr(self.agent, name)
         data_loader = self._data_loader_test.get(name)

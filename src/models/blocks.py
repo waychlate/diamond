@@ -181,7 +181,8 @@ class ResBlocks(nn.Module):
 
 
 class UNet(nn.Module):
-    def __init__(self, cond_channels: int, depths: List[int], channels: List[int], attn_depths: List[int]) -> None:
+    def __init__(self, cond_channels: int, depths: List[int], channels: List[int], attn_depths: List[int],
+                 dense_dim: int = 0, bottleneck_features: int = 0) -> None:
         super().__init__()
         assert len(depths) == len(channels) == len(attn_depths)
         self._num_down = len(channels) - 1
@@ -216,12 +217,22 @@ class UNet(nn.Module):
             attn=True,
         )
 
+        # Optional KineMamba-style dense bottleneck: flatten -> Linear(F, d) -> SiLU -> Linear(d, F), added back
+        # to the map. The output layer starts at zero, so a new model begins with the plain U-Net.
+        self.dense_in = self.dense_out = None
+        if dense_dim > 0:
+            self.dense_in = nn.Linear(bottleneck_features, dense_dim)
+            self.dense_out = nn.Linear(dense_dim, bottleneck_features)
+            nn.init.zeros_(self.dense_out.weight)
+            nn.init.zeros_(self.dense_out.bias)
+
         downsamples = [nn.Identity()] + [Downsample(c) for c in channels[:-1]]
         upsamples = [nn.Identity()] + [Upsample(c) for c in reversed(channels[:-1])]
         self.downsamples = nn.ModuleList(downsamples)
         self.upsamples = nn.ModuleList(upsamples)
 
-    def forward(self, x: Tensor, cond: Tensor) -> Tensor:
+    def encode(self, x: Tensor, cond: Tensor):
+        """Down path and bottleneck: (bottleneck map, skip outputs, dense hidden vector or None)."""
         *_, h, w = x.size()
         n = self._num_down
         padding_h = math.ceil(h / 2 ** n) * 2 ** n - h
@@ -235,7 +246,16 @@ class UNet(nn.Module):
             d_outputs.append((x_down, *block_outputs))
 
         x, _ = self.mid_blocks(x, cond)
-        
+        hidden = None
+        if self.dense_in is not None:
+            hidden = F.silu(self.dense_in(x.flatten(start_dim=1)))
+            x = x + self.dense_out(hidden).view_as(x)
+        return x, d_outputs, hidden
+
+    def forward(self, x: Tensor, cond: Tensor) -> Tensor:
+        *_, h, w = x.size()
+        x, d_outputs, _ = self.encode(x, cond)
+
         u_outputs = []
         for block, up, skip in zip(self.u_blocks, self.upsamples, reversed(d_outputs)):
             x_up = up(x)

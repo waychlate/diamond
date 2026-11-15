@@ -23,7 +23,9 @@ Match KineMamba wherever a setting means the same thing in both models:
 - **Pixel scale:** KineMamba normalizes pixels to [-0.5, 0.5] (`x/255 - 0.5`), while DIAMOND uses [-1, 1]. The MAE formulas are the same, so the same image error gives DIAMOND an MAE twice as large. Halve DIAMOND's pixel MAE before putting it next to KineMamba's.
 - **Unmasked means unweighted:** the unmasked pixel MAE is the plain MAE over all pixels, not the gain-weighted training loss. At gain 40 the weighted loss reads about 23% higher than the plain MAE on the same predictions.
 - **Aggregation:** pool before dividing (sum of absolute errors over sum of pixels or mask weights), not a mean of per-batch ratios.
-- **Checkpoint selection:** both models keep a `best.pt` chosen on the held-out fold that is also reported (DIAMOND by mean denoiser test loss, KineMamba by validation pixel+TTC loss). Say so when reporting best-epoch numbers.
+- **Checkpoint selection:** both models keep a `best.pt` chosen on the held-out fold that is also reported (KineMamba by validation pixel loss + TTC loss; DIAMOND by mean denoiser test loss, or by weighted pixel MAE + TTC MAE with weight 1 when the TTC head is trained jointly, to mirror KineMamba). Say so when reporting best-epoch numbers.
+
+- **Parameter count:** the plan is to meet KineMamba in the middle. DIAMOND grows through a KineMamba-style dense bottleneck (`--dense-bottleneck-dim 1024`: flatten the 64×6×40 map, Linear 15,360→1024, SiLU, Linear 1024→15,360, added back), which adds 31.5M parameters at almost no compute, so latency is unchanged. Total 36.07M with the TTC head, which then reads the 1024-d vector instead of the pooled map. See `docs/parameter_scaling.md` (option 1.2).
 
 Some settings depend on the architecture: epochs, batch size, learning rate, optimizer, context handling. Record those instead of matching them, together with training wall time, GPU, parameter count, inference latency and peak memory.
 
@@ -36,7 +38,7 @@ When a change could affect fairness and these rules don't settle it, ask the use
 - **Vocabulary:** `CONTEXT.md` is the glossary. Use its terms.
 - **Pixel CV workflow:** `docs/pixel_evaluation.md` describes the workflow, and `slurm/README.md` describes the jobs.
 - **Training loss:** `src/models/diffusion/denoiser.py`.
-- **TTC head:** `src/models/ttc_head.py` predicts TTC from the U-Net bottleneck latents and is trained separately (`scripts/train_latent_ttc.py`).
+- **TTC head:** `src/models/ttc_head.py` is KineMamba's TTCPredictor MLP (1024→256→128→1, ReLU, dropout 0.2, 295,425 params), fed the 64×6×40 bottleneck average-pooled to 64×2×8 = 1024 features. Heads trained before this change (conv + MLP, 492,545 params, including the 0.790 s smoke result) cannot be loaded with it. Two ways to train it: separately on a frozen denoiser (`scripts/train_latent_ttc.py`), or jointly with the denoiser (`--ttc-loss-weight` > 0, see `ttc_loss_weight` in `src/models/diffusion/denoiser.py`), as KineMamba does; the joint head is scored by `scripts/evaluate_ttc.py` into `ttc_eval/`.
 - **`viz/`:** local copies of cluster results, pulled with rsync. Treat it as data, not source.
 
 ## Running

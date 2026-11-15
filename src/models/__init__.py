@@ -1,1 +1,1 @@
-from .ttc_head import LatentTTCHead, TTCHeadConfig
+from .ttc_head import LatentTTCHead

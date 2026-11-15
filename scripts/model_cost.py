@@ -25,23 +25,37 @@ def cost(checkpoint, *, sigma_data=0.15, order=1, warmup=20, iters=200, device=N
     img_channels = 3
     num_cond = sd["denoiser.inner_model.conv_in.weight"].shape[1] // img_channels - 1
     cond_channels = sd["denoiser.inner_model.act_emb.0.weight"].shape[1] * num_cond
+    # A jointly trained TTC head lives inside the denoiser and is rebuilt from the weights' shape.
+    has_head = any(k.startswith("denoiser.ttc_head.") for k in sd)
+    dense = sd.get("denoiser.inner_model.unet.dense_in.weight")
+    dense_dim = 0 if dense is None else dense.shape[0]
+    head_overrides = [f"agent.denoiser.inner_model.dense_bottleneck_dim={dense_dim}"] + ([] if not has_head else [
+        "agent.denoiser.ttc_loss_weight=1.0",
+        f"agent.denoiser.ttc_hidden_dim={sd['denoiser.ttc_head.head.0.weight'].shape[0]}"])
     OmegaConf.register_new_resolver("eval", eval, replace=True)
     with initialize_config_dir(version_base="1.3", config_dir=str(ROOT / "config")):
         cfg = compose(config_name="trainer", overrides=[
             f"agent.denoiser.inner_model.num_steps_conditioning={num_cond}",
             f"agent.denoiser.inner_model.cond_channels={cond_channels}",
             f"agent.denoiser.sigma_data={sigma_data}",
-            f"world_model_env.diffusion_sampler.order={order}"])
+            f"world_model_env.diffusion_sampler.order={order}", *head_overrides])
     agent = Agent(instantiate(cfg.agent, num_actions=cfg.env.num_actions)).to(device).eval()
     agent.load(checkpoint)
     sampler = DiffusionSampler(agent.denoiser, cfg.world_model_env.diffusion_sampler)
 
     params = {name: sum(p.numel() for p in getattr(agent, name).parameters())
               for name in ("denoiser", "rew_end_model", "actor_critic")}
-    # KineMamba-style split of the denoiser: U-Net down path = "encoder", everything else
-    # (action/noise conditioning, bottleneck, up path with skips, output conv) = "world_model".
-    encoder = sum(p.numel() for n, p in agent.denoiser.inner_model.named_parameters()
-                  if n.startswith(("conv_in", "unet.d_blocks", "unet.downsamples")))
+    head = sum(p.numel() for p in agent.denoiser.ttc_head.parameters()) if has_head else 0
+    params["denoiser"] -= head  # Pixel prediction never runs the head.
+    # KineMamba's four parts (check_sizes.py at 2ca0240). Encoder = down path; Decoder = up path and output conv;
+    # Latent_Predictor = what sits between them (conditioning, bottleneck blocks, dense bottleneck).
+    inner = agent.denoiser.inner_model
+    prefixes = {"Encoder": ("conv_in", "unet.d_blocks", "unet.downsamples"),
+                "Decoder": ("unet.u_blocks", "unet.upsamples", "norm_out", "conv_out")}
+    parts = {name: sum(p.numel() for n, p in inner.named_parameters() if n.startswith(pre))
+             for name, pre in prefixes.items()}
+    parts = {"Encoder": parts["Encoder"], "Latent_Predictor": params["denoiser"] - sum(parts.values()),
+             "Decoder": parts["Decoder"]}
     h, w = cfg.env.train.size
     obs = torch.rand(1, num_cond, img_channels, h, w, device=device) * 2 - 1
     act = torch.zeros(1, num_cond, dtype=torch.long, device=device)
@@ -63,10 +77,11 @@ def cost(checkpoint, *, sigma_data=0.15, order=1, warmup=20, iters=200, device=N
         "checkpoint": str(checkpoint), "device": torch.cuda.get_device_name(device) if device.type == "cuda" else "cpu",
         "conditioning_frames": num_cond, "cond_channels": cond_channels, "image_size": [h, w],
         "denoising_steps": cfg.world_model_env.diffusion_sampler.num_steps_denoising, "sampler_order": order,
-        "params": params, "params_total": sum(params.values()),
+        "params": params, "params_total": sum(params.values()) + head,
+        "ttc_head_params": head, "ttc_head_trained_jointly": has_head,
         "next_frame_params": params["denoiser"],  # Only the denoiser runs to predict pixels.
         "next_frame_params_mb_fp32": params["denoiser"] * 4 / 2**20,  # Same as KineMamba's check_mamba_size.py.
-        "next_frame_params_by_part": {"encoder": encoder, "world_model": params["denoiser"] - encoder},
+        "next_frame_params_by_part": parts,
         "batch_size": 1, "warmup": warmup, "iters": iters,
         "latency_ms_mean": sum(times) / len(times), "latency_ms_median": times[len(times) // 2],
         "latency_ms_p95": times[int(len(times) * 0.95)],
@@ -84,10 +99,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
     result = cost(args.checkpoint.resolve(), order=args.order, iters=args.iters, device=args.device)
     text = json.dumps(result, indent=2)
-    # Same layout as KineMamba's check_sizes.py: part, param_count, size in MB (params * 4 bytes).
-    from models.ttc_head import LatentTTCHead  # Untrained, no-LSTM head on the 64-channel bottleneck.
-    parts = {**{k.title().replace("World_model", "World_Model"): v for k, v in result["next_frame_params_by_part"].items()},
-             "TTC_Predictor": sum(p.numel() for p in LatentTTCHead(in_channels=64).parameters())}
+    # Same parts as KineMamba's check_sizes.py: Encoder, Latent_Predictor, Decoder, TTC_Predictor (fp32 MB = params * 4).
+    from models.ttc_head import LatentTTCHead  # Untrained head (KineMamba's MLP) on the 64-channel bottleneck.
+    parts = {**result["next_frame_params_by_part"],
+             "TTC_Predictor": result["ttc_head_params"] or sum(p.numel() for p in LatentTTCHead(in_channels=64).parameters())}
     print("Part of pipeline, param_count, size in MB")
     for name, count in parts.items():
         print(f"{name}: {count}, {count * 4 / 1024**2}")

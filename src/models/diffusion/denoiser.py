@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from data import Batch
 from .inner_model import InnerModel, InnerModelConfig
 from utils import LossAndLogs
+from ..ttc_head import LatentTTCHead
 from vehicle_mask import build_mask_from_fullres
 
 
@@ -42,6 +43,11 @@ class DenoiserConfig:
     pixel_mae_weight: float = 0.0
     # 0 with pixel_mae_weight > 0 trains on the vehicle-weighted pixel MAE alone (KineMamba's pixel loss).
     diffusion_mse_weight: float = 1.0
+    # > 0 adds a TTC head on the U-Net bottleneck and trains it jointly: weight * L1 of the next frame's TTC (seconds).
+    # The gradient reaches conv_in, the down blocks, the bottleneck and the conditioning layers, not the up path.
+    ttc_loss_weight: float = 0.0
+    ttc_hidden_dim: int = 256
+    ttc_dropout: float = 0.2
 
 
 def vehicle_weighted_pixel_mae(prediction: Tensor, target: Tensor, gain: float) -> Tensor:
@@ -58,13 +64,18 @@ class Denoiser(nn.Module):
     def __init__(self, cfg: DenoiserConfig) -> None:
         super().__init__()
         self.cfg = cfg
-        for name in ("pixel_mask_gain", "pixel_mae_weight", "diffusion_mse_weight"):
+        for name in ("pixel_mask_gain", "pixel_mae_weight", "diffusion_mse_weight", "ttc_loss_weight"):
             value = getattr(cfg, name)
             if not math.isfinite(value) or value < 0:
                 raise ValueError(f"{name} must be finite and nonnegative")
         if cfg.pixel_mae_weight == 0 and cfg.diffusion_mse_weight == 0:
             raise ValueError("pixel_mae_weight and diffusion_mse_weight cannot both be zero")
         self.inner_model = InnerModel(cfg.inner_model)
+        self.ttc_head = None
+        if cfg.ttc_loss_weight > 0:
+            self.ttc_head = LatentTTCHead(in_channels=cfg.inner_model.channels[-1], hidden_dim=cfg.ttc_hidden_dim,
+                                          dropout=cfg.ttc_dropout,
+                                          in_features=cfg.inner_model.dense_bottleneck_dim or None)
         self.sample_sigma_training = None
 
     @property
@@ -123,9 +134,15 @@ class Denoiser(nn.Module):
             raise ValueError("A denoising batch must contain at least one frame after the conditioning context")
 
         all_obs = batch.obs.clone()
+        ttc = None
+        if self.ttc_head is not None:
+            if not all("obs_ttc" in info for info in batch.info):
+                raise ValueError("ttc_loss_weight > 0 needs obs_ttc in the dataset")
+            ttc = torch.stack([info["obs_ttc"] for info in batch.info]).to(self.device).float().clamp(min=0.0)
         loss = next(self.inner_model.parameters()).sum() * 0.0
         diffusion_mse = 0
         pixel_mae = 0
+        ttc_l1 = 0
         valid_steps = 0
 
         for i in range(seq_length):
@@ -162,6 +179,13 @@ class Denoiser(nn.Module):
                 pixel_mae = pixel_mae + weighted_mae
                 loss = loss + self.cfg.pixel_mae_weight * weighted_mae
 
+            if ttc is not None:
+                # A clean pass (no noise, zero next frame) like the one the head reads at inference.
+                pred_ttc = self.ttc_head(self.extract_latent(all_obs[:, i : n + i], act))[0].squeeze(-1)
+                step_ttc = F.l1_loss(pred_ttc[mask], ttc[:, n + i][mask])
+                ttc_l1 = ttc_l1 + step_ttc
+                loss = loss + self.cfg.ttc_loss_weight * step_ttc
+
             denoised = self.wrap_model_output(noisy_next_obs, model_output, cs)
             all_obs[:, n + i] = denoised
 
@@ -173,4 +197,6 @@ class Denoiser(nn.Module):
                 "loss_diffusion_mse": torch.as_tensor(diffusion_mse / denominator, device=loss.device).detach()}
         if self.cfg.pixel_mae_weight > 0:
             logs["loss_weighted_pixel_mae"] = torch.as_tensor(pixel_mae / denominator, device=loss.device).detach()
+        if ttc is not None:
+            logs["loss_ttc"] = torch.as_tensor(ttc_l1 / denominator, device=loss.device).detach()
         return loss, logs

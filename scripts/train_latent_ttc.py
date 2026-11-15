@@ -103,7 +103,7 @@ def extract_latents_for_sequence(
     Extracts latents across all time steps in a sequence in a single batched pass.
     obs: (B, seq_len, 3, H, W)
     act: (B, seq_len)
-    Returns: (B, context_len, C, H_mid, W_mid)
+    Returns: (B, context_len, C, H_mid, W_mid), or (B, context_len, D) with a dense bottleneck
     """
     b, seq_len, c, h, w = obs.shape
     windows_obs = torch.stack([obs[:, t : t + num_cond] for t in range(context_len)], dim=1)
@@ -113,8 +113,7 @@ def extract_latents_for_sequence(
     flat_act = windows_act.reshape(b * context_len, num_cond)
     
     flat_z = agent.denoiser.extract_latent(flat_obs, flat_act)
-    _, c_mid, h_mid, w_mid = flat_z.shape
-    return flat_z.reshape(b, context_len, c_mid, h_mid, w_mid)
+    return flat_z.reshape(b, context_len, *flat_z.shape[1:])
 
 
 @torch.no_grad()
@@ -275,7 +274,8 @@ def train_latent_ttc(args):
     ttc_head = LatentTTCHead(
         in_channels=in_channels,
         hidden_dim=args.hidden_dim,
-        dropout=args.dropout
+        dropout=args.dropout,
+        in_features=cfg.agent.denoiser.inner_model.get("dense_bottleneck_dim", 0) or None,
     ).to(device)
     
     optimizer = torch.optim.AdamW(ttc_head.parameters(), lr=args.lr, weight_decay=1e-4)
@@ -446,11 +446,11 @@ if __name__ == "__main__":
     parser.add_argument("--steps_per_epoch", type=int, default=500, help="Number of batches/steps per epoch (default: 500)")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
-    parser.add_argument("--hidden_dim", type=int, default=128, help="Hidden dimension for LatentTTCHead")
+    parser.add_argument("--hidden_dim", type=int, default=256, help="First hidden layer of the head (default: 256, as KineMamba)")
     parser.add_argument("--context_len", type=int, default=20, help="Sliding windows scored per training segment; each window is the model's own num_steps_conditioning frames (default: 20)")
     parser.add_argument("--dt", type=float, default=0.1, help="Delta time per step in seconds (default: 0.1s for 10Hz)")
     parser.add_argument("--max_ttc", type=float, default=None, help="Max TTC cap in seconds (default: None for uncapped)")
-    parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate")
+    parser.add_argument("--dropout", type=float, default=0.2, help="Dropout rate (default: 0.2, as KineMamba)")
     parser.add_argument("--num_workers", type=int, default=4, help="DataLoader num workers (default: 4; use 0 if memory is tight)")
     parser.add_argument("--resume", action="store_true", default=True, help="Always on: if save_path already exists, training resumes from it instead of starting fresh. Use a new save_path for a new run.")
     parser.add_argument("--device", type=str, default="cuda", help="Device (cuda or cpu)")
