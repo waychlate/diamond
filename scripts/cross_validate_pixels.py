@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def training_command(dataset, run, fold, *, resume=False, epochs=50, workers=8,
                      pixel_mask_gain=0.0, pixel_mae_weight=0.0, diffusion_mse_weight=1.0, ttc_loss_weight=0.0,
-                     dense_bottleneck_dim=0):
+                     dense_bottleneck_dim=0, kinemamba_unet=False):
     command = [sys.executable, str(ROOT / "src/main.py"),
                f"static_dataset.path={dataset}", f"hydra.run.dir={run}",
                "initialization.path_to_ckpt=null", "agent.denoiser.sigma_data=0.15",
@@ -26,6 +26,9 @@ def training_command(dataset, run, fold, *, resume=False, epochs=50, workers=8,
                f"agent.denoiser.ttc_loss_weight={ttc_loss_weight}",
                # > 0 adds a KineMamba-style dense bottleneck to grow DIAMOND's parameter count.
                f"agent.denoiser.inner_model.dense_bottleneck_dim={dense_bottleneck_dim}",
+               # KineMamba-shaped U-Net at KineMamba's encoder widths (noise in every block, actions at the bottleneck).
+               f"agent.denoiser.inner_model.kinemamba_unet={kinemamba_unet}",
+               *(["agent.denoiser.inner_model.channels=[128,192,256,256]"] if kinemamba_unet else []),
                # The reward/end model is not used for pixels or TTC and took half of each epoch.
                "rew_end_model.training.start_after_epochs=999999",
                # Keep a checkpoint every 5 epochs (the last 11 are kept), so the epoch curve survives.
@@ -60,13 +63,17 @@ def run_fold(args):
         if int(saved) != args.dense_bottleneck_dim:
             raise ValueError(f"Cannot resume with changed dense_bottleneck_dim: saved {saved}, "
                              f"requested {args.dense_bottleneck_dim}")
+        saved = OmegaConf.select(previous, "agent.denoiser.inner_model.kinemamba_unet", default=False)
+        if bool(saved) != args.kinemamba_unet:
+            raise ValueError(f"Cannot resume with changed kinemamba_unet: saved {saved}, requested {args.kinemamba_unet}")
     subprocess.run(training_command(dataset, run, args.fold, resume=args.resume,
                                    epochs=args.epochs, workers=args.workers,
                                    pixel_mask_gain=args.pixel_mask_gain,
                                    pixel_mae_weight=args.pixel_mae_weight,
                                    diffusion_mse_weight=args.diffusion_mse_weight,
                                    ttc_loss_weight=args.ttc_loss_weight,
-                                   dense_bottleneck_dim=args.dense_bottleneck_dim), cwd=ROOT, check=True)
+                                   dense_bottleneck_dim=args.dense_bottleneck_dim,
+                                   kinemamba_unet=args.kinemamba_unet), cwd=ROOT, check=True)
     evaluation = run / "pixel_eval"
     if (evaluation / "summary.json").is_file():
         print(f"Fold evaluation already complete: {evaluation}")
@@ -98,7 +105,7 @@ def aggregate(output):
             raise FileNotFoundError(f"All five folds must finish before aggregation; missing {path}")
         summaries.append(json.loads(path.read_text()))
     for setting in ("training_pixel_mask_gain", "training_pixel_mae_weight", "training_diffusion_mse_weight", "training_ttc_loss_weight",
-                    "training_dense_bottleneck_dim"):
+                    "training_dense_bottleneck_dim", "training_kinemamba_unet"):
         if len({summary.get(setting) for summary in summaries}) != 1:
             raise ValueError(f"Cannot aggregate folds trained with different {setting}")
     result = {"folds": 5, "fold_results": summaries,
@@ -138,6 +145,8 @@ if __name__ == "__main__":
                         help="> 0 trains a TTC head jointly with the denoiser and scores it into ttc_eval/")
     parser.add_argument("--dense-bottleneck-dim", type=int, default=0,
                         help="> 0 adds a dense bottleneck of this width (1024 adds 31.5M parameters)")
+    parser.add_argument("--kinemamba-unet", action="store_true",
+                        help="KineMamba-shaped U-Net, widths [128,192,256,256]; needs --dense-bottleneck-dim > 0")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--aggregate", action="store_true")
     args = parser.parse_args()

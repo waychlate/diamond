@@ -23,6 +23,8 @@ denoiser:
     attn_depths: [0,0,0,0]
     # > 0 adds a KineMamba-style dense bottleneck (flatten -> d -> flatten, residual); 1024 adds 31.5M parameters.
     dense_bottleneck_dim: 0
+    # true: KineMamba-shaped U-Net (noise in every block, actions only at the dense bottleneck); see blocks.py.
+    kinemamba_unet: false
     img_size: ${env.train.size}
 
 rew_end_model:

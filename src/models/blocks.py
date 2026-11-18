@@ -264,3 +264,64 @@ class UNet(nn.Module):
 
         x = x[..., :h, :w]
         return x, d_outputs, u_outputs
+
+
+# KineMamba-shaped U-Net: KineMamba's Encoder/Decoder (src/models/encoder_decoder.py, use_skips=True) with noise
+# conditioning (AdaGroupNorm) in every ResBlock. Actions enter only at the bottleneck, concatenated onto the
+# flattened map before the dense layer, as KineMamba feeds them to Mamba2 (LayerNorm, then proj_in).
+
+
+class KineMambaUNet(nn.Module):
+    def __init__(self, cond_channels: int, depths: List[int], channels: List[int], attn_depths: List[int],
+                 dense_dim: int, bottleneck_features: int, act_features: int) -> None:
+        super().__init__()
+        assert len(depths) == len(channels) == len(attn_depths)
+        if dense_dim <= 0:
+            raise ValueError("kinemamba_unet needs dense_bottleneck_dim > 0: the dense layer is where actions enter")
+        self._num_down = len(channels)  # KineMamba downsamples after every level: 48×320 -> 3×20
+
+        d_blocks, u_blocks = [], []
+        for i, n in enumerate(depths):
+            c1 = channels[max(0, i - 1)]
+            c2 = channels[i]
+            d_blocks.append(ResBlocks([c1] + [c2] * (n - 1), [c2] * n, cond_channels, attn_depths[i]))
+            u_blocks.append(ResBlocks([c2] * n, [c2] * (n - 1) + [c1], cond_channels, attn_depths[i]))
+        self.d_blocks = nn.ModuleList(d_blocks)
+        self.u_blocks = nn.ModuleList(reversed(u_blocks))
+        self.downsamples = nn.ModuleList([Downsample(c) for c in channels])
+        self.upsamples = nn.ModuleList([Upsample(c) for c in reversed(channels)])
+        # KineMamba's additive skips: one zero-initialised 1×1 conv per level.
+        self.skip_proj = nn.ModuleList([Conv1x1(c, c) for c in reversed(channels)])
+        for conv in self.skip_proj:
+            nn.init.zeros_(conv.weight)
+            nn.init.zeros_(conv.bias)
+
+        # DIAMOND's bottleneck blocks, at 3×20 (KineMamba has Mamba2 here).
+        self.mid_blocks = ResBlocks([channels[-1]] * 2, [channels[-1]] * 2, cond_channels, attn=True)
+        self.dense_norm = nn.LayerNorm(bottleneck_features + act_features)
+        self.dense_in = nn.Linear(bottleneck_features + act_features, dense_dim)
+        self.dense_out = nn.Linear(dense_dim, bottleneck_features)
+        nn.init.zeros_(self.dense_out.weight)
+        nn.init.zeros_(self.dense_out.bias)
+
+    def encode(self, x: Tensor, cond: Tensor, act: Tensor):
+        """Down path and bottleneck: (bottleneck map, per-level skips, dense hidden vector)."""
+        *_, h, w = x.size()
+        n = 2 ** self._num_down
+        x = F.pad(x, (0, math.ceil(w / n) * n - w, 0, math.ceil(h / n) * n - h))
+        skips = []
+        for block, down in zip(self.d_blocks, self.downsamples):
+            x, _ = block(x, cond)
+            skips.append(x)
+            x = down(x)
+        x, _ = self.mid_blocks(x, cond)
+        hidden = F.silu(self.dense_in(self.dense_norm(torch.cat((x.flatten(start_dim=1), act), dim=1))))
+        x = x + self.dense_out(hidden).view_as(x)
+        return x, skips, hidden
+
+    def forward(self, x: Tensor, cond: Tensor, act: Tensor):
+        *_, h, w = x.size()
+        x, skips, hidden = self.encode(x, cond, act)
+        for block, up, proj, skip in zip(self.u_blocks, self.upsamples, self.skip_proj, reversed(skips)):
+            x, _ = block(up(x) + proj(skip), cond)
+        return x[..., :h, :w], skips, hidden

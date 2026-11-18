@@ -100,5 +100,35 @@ class DenseBottleneckTests(unittest.TestCase):
                                         joint["inner_model.unet.dense_in.weight"], atol=1e-6))
 
 
+class KineMambaUNetTests(unittest.TestCase):
+    def model(self):
+        torch.manual_seed(0)
+        model = InnerModel(InnerModelConfig(3, 2, 8, [1, 1, 1, 1], [8, 8, 8, 8], [0, 0, 0, 0], 5,
+                                            dense_bottleneck_dim=16, img_size=[48, 320], kinemamba_unet=True))
+        for p in model.parameters():  # The default init zeroes layers, which hides any effect.
+            p.data.normal_(0, 0.1)
+        return model
+
+    def test_actions_enter_only_at_the_bottleneck(self):
+        model = self.model()
+        self.assertEqual(model.unet.dense_in.in_features, 8 * 3 * 20 + 2 * 32)  # 48×320 halved four times
+        noisy, obs = torch.randn(1, 3, 48, 320), torch.randn(1, 6, 48, 320)
+        act_a, act_b = torch.zeros(1, 2, dtype=torch.long), torch.ones(1, 2, dtype=torch.long)
+        out = model(noisy, torch.zeros(1), obs, act_a)
+        self.assertEqual(out.shape, (1, 3, 48, 320))
+        self.assertFalse(torch.allclose(out, model(noisy, torch.zeros(1), obs, act_b)))
+        self.assertFalse(torch.allclose(out, model(noisy, torch.ones(1), obs, act_a)))
+        model.unet.dense_out.weight.data.zero_()
+        model.unet.dense_out.bias.data.zero_()
+        self.assertTrue(torch.allclose(model(noisy, torch.zeros(1), obs, act_a),
+                                       model(noisy, torch.zeros(1), obs, act_b)))
+        self.assertEqual(model.extract_latent(obs, act_a).shape, (1, 16))
+
+    def test_needs_the_dense_layer(self):
+        with self.assertRaisesRegex(ValueError, "dense_bottleneck_dim"):
+            InnerModel(InnerModelConfig(3, 2, 8, [1, 1, 1, 1], [8, 8, 8, 8], [0, 0, 0, 0], 5,
+                                        img_size=[48, 320], kinemamba_unet=True))
+
+
 if __name__ == "__main__":
     unittest.main()

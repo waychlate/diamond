@@ -24,12 +24,16 @@ def cost(checkpoint, *, sigma_data=0.15, order=1, warmup=20, iters=200, device=N
     # Read the architecture from the weights: conv_in stacks (context + noisy target) frames as channels.
     img_channels = 3
     num_cond = sd["denoiser.inner_model.conv_in.weight"].shape[1] // img_channels - 1
-    cond_channels = sd["denoiser.inner_model.act_emb.0.weight"].shape[1] * num_cond
+    cond_channels = sd["denoiser.inner_model.cond_proj.0.weight"].shape[1]
+    kinemamba_unet = "denoiser.inner_model.unet.skip_proj.0.weight" in sd
+    channels = [sd[f"denoiser.inner_model.unet.d_blocks.{i}.resblocks.0.conv1.weight"].shape[0] for i in range(4)]
     # A jointly trained TTC head lives inside the denoiser and is rebuilt from the weights' shape.
     has_head = any(k.startswith("denoiser.ttc_head.") for k in sd)
     dense = sd.get("denoiser.inner_model.unet.dense_in.weight")
     dense_dim = 0 if dense is None else dense.shape[0]
-    head_overrides = [f"agent.denoiser.inner_model.dense_bottleneck_dim={dense_dim}"] + ([] if not has_head else [
+    head_overrides = [f"agent.denoiser.inner_model.dense_bottleneck_dim={dense_dim}",
+                      f"agent.denoiser.inner_model.kinemamba_unet={kinemamba_unet}",
+                      f"agent.denoiser.inner_model.channels=[{','.join(map(str, channels))}]"] + ([] if not has_head else [
         "agent.denoiser.ttc_loss_weight=1.0",
         f"agent.denoiser.ttc_hidden_dim={sd['denoiser.ttc_head.head.0.weight'].shape[0]}"])
     OmegaConf.register_new_resolver("eval", eval, replace=True)
@@ -51,7 +55,7 @@ def cost(checkpoint, *, sigma_data=0.15, order=1, warmup=20, iters=200, device=N
     # Latent_Predictor = what sits between them (conditioning, bottleneck blocks, dense bottleneck).
     inner = agent.denoiser.inner_model
     prefixes = {"Encoder": ("conv_in", "unet.d_blocks", "unet.downsamples"),
-                "Decoder": ("unet.u_blocks", "unet.upsamples", "norm_out", "conv_out")}
+                "Decoder": ("unet.u_blocks", "unet.upsamples", "unet.skip_proj", "norm_out", "conv_out")}
     parts = {name: sum(p.numel() for n, p in inner.named_parameters() if n.startswith(pre))
              for name, pre in prefixes.items()}
     parts = {"Encoder": parts["Encoder"], "Latent_Predictor": params["denoiser"] - sum(parts.values()),

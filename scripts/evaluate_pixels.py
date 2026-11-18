@@ -157,6 +157,7 @@ def evaluate(dataset_path, checkpoint, output, *, config_path=None, sigma_data=0
         "training_diffusion_mse_weight": float(OmegaConf.select(cfg, "agent.denoiser.diffusion_mse_weight", default=1.0)),
         "training_ttc_loss_weight": float(OmegaConf.select(cfg, "agent.denoiser.ttc_loss_weight", default=0.0)),
         "training_dense_bottleneck_dim": int(OmegaConf.select(cfg, "agent.denoiser.inner_model.dense_bottleneck_dim", default=0)),
+        "training_kinemamba_unet": bool(OmegaConf.select(cfg, "agent.denoiser.inner_model.kinemamba_unet", default=False)),
         "dataset": str(dataset_path), "seed": seed, "batch_size": batch_size,
         "sampler_order": order, "conditioning_frames": num_cond,
         "episodes": len(episode_rows), "dataset_episodes": dataset.num_episodes,
