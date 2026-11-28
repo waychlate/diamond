@@ -6,6 +6,7 @@
 #SBATCH --mail-user=khek.do@ufl.edu
 # KineMamba-shaped U-Net (see CLAUDE.md). Fold 0 only; --array=0-4 for the full CV.
 # Timing run first: sbatch --export=ALL,EPOCHS=1 <this script> (writes to a separate _timing_e1 directory).
+# Resume an existing run: sbatch --export=ALL,RESUME=1 <this script>
 #SBATCH --array=0
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -43,4 +44,4 @@ python -u scripts/cross_validate_pixels.py \
     --diffusion-mse-weight 0 \
     --batch-size 32 \
     --dense-bottleneck-dim 1024 \
-    --kinemamba-unet
+    --kinemamba-unet ${RESUME:+--resume}
